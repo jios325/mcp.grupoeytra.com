@@ -42,20 +42,30 @@ export class CmsPublico {
     return { entregas, devoluciones, ajustes: ajustes[0] ?? null };
   }
 
-  /** Catálogo publicado (la misma vista que lee /catalog de la API), hasta 20 productos. */
-  async catalogo(buscar?: string) {
-    const productos = await this.vista(
-      'shop_catalog',
-      'slug, name, category, price, sale_mode, recurring_interval, pack_quantity, pack_unit, summary',
-      (q) => {
-        let r = q.order('sort_order').order('name').limit(20);
-        const termino = buscar?.replace(/[%,()*\\]/g, ' ').trim();
-        if (termino) r = r.or(`name.ilike.%${termino}%,category.ilike.%${termino}%,summary.ilike.%${termino}%`);
-        return r;
-      },
-    );
+  /** Catálogo publicado (la misma vista que lee /catalog de la API), con el total y orden por precio. */
+  async catalogo(opciones: { buscar?: string; orden?: 'destacados' | 'precio_asc' | 'precio_desc'; limite?: number } = {}) {
+    const limite = Math.min(Math.max(opciones.limite ?? 20, 1), 50);
+    const termino = opciones.buscar?.replace(/[%,()*\\]/g, ' ').trim();
+    let consulta = this.supabase
+      .from('shop_catalog')
+      .select('slug, name, category, price, sale_mode, recurring_interval, pack_quantity, pack_unit, summary', { count: 'exact' });
+    if (termino) consulta = consulta.or(`name.ilike.%${termino}%,category.ilike.%${termino}%,summary.ilike.%${termino}%`);
+    if (opciones.orden === 'precio_asc' || opciones.orden === 'precio_desc') {
+      consulta = consulta.order('price', { ascending: opciones.orden === 'precio_asc' }).order('name');
+    } else {
+      consulta = consulta.order('sort_order').order('name');
+    }
+    const { data, error, count } = await consulta.limit(limite).abortSignal(AbortSignal.timeout(8000));
+    if (error) {
+      console.error('[cms] vista pública con error', { nombre: 'shop_catalog', code: error.code, message: error.message });
+      throw new Error('No se pudo leer la información del CMS.');
+    }
+    const productos = data ?? [];
     return {
       nota: 'Precios de lista en MXN con IVA incluido; descuentos solo con una cotización aprobada por Eytra.',
+      orden: opciones.orden ?? 'destacados',
+      total: count ?? productos.length,
+      hay_mas: (count ?? 0) > productos.length,
       productos,
       tienda: 'https://grupoeytra.com/tienda',
     };

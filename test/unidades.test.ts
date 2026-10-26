@@ -36,6 +36,8 @@ test('llms.txt: lee enlaces con su sección y busca sin acentos', () => {
   assert.equal(buscarEntradas(entradas, 'legionella HOTELES')[0]?.seccion, 'Recursos');
   assert.equal(buscarEntradas(entradas, 'albercas')[0]?.titulo, 'NOM-245-SSA1-2010');
   assert.deepEqual(buscarEntradas(entradas, 'tornillos'), []);
+  // Raíz de 6 letras: «microbiológico» (sin la «s») encuentra «microbiológicos».
+  assert.equal(buscarEntradas(entradas, 'microbiologico')[0]?.url, 'https://grupoeytra.com/laboratorio');
 });
 
 test('leer páginas: solo el dominio del sitio', () => {

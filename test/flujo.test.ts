@@ -66,10 +66,15 @@ class LoginFalso extends LoginSupabase {
 }
 
 class CmsFalso extends CmsPublico {
-  override async catalogo() {
-    return { nota: 'Precios de lista', productos: [{ slug: 'cloro', price: 100 }], tienda: 'https://grupoeytra.com/tienda' };
+  pedidos: Parameters<CmsPublico['catalogo']>[0][] = [];
+  override async catalogo(opciones: Parameters<CmsPublico['catalogo']>[0] = {}) {
+    this.pedidos.push(opciones);
+    const productos = [{ slug: 'cloro', name: 'Cloro', category: 'quimicos', price: 100, sale_mode: 'shipping', recurring_interval: null, pack_quantity: 1, pack_unit: 'L', summary: null }];
+    return { nota: 'Precios de lista', orden: opciones.orden ?? 'destacados', total: 1, hay_mas: false, productos, tienda: 'https://grupoeytra.com/tienda' } as Awaited<ReturnType<CmsPublico['catalogo']>>;
   }
 }
+
+const cmsFalso = new CmsFalso({ supabaseUrl: 'http://supabase.invalid', supabaseLlavePublicable: 'x' });
 
 class SitioFalso extends Sitio {
   override async indiceSitio() {
@@ -114,7 +119,7 @@ before(async () => {
     asistente,
     login: new LoginFalso(),
     sitio: new SitioFalso('https://grupoeytra.com'),
-    cms: new CmsFalso({ supabaseUrl: 'http://supabase.invalid', supabaseLlavePublicable: 'x' }),
+    cms: cmsFalso,
   });
   const servidor = app.listen(puerto, '127.0.0.1');
   await new Promise((ok) => servidor.once('listening', ok));
@@ -234,6 +239,8 @@ describe('sin sesión', () => {
     for (const n of ['buscar_en_sitio', 'leer_pagina', 'catalogo_de_productos', 'estado_de_cuenta', 'resumen_del_dia']) assert.ok(nombres.includes(n), n);
     assert.match(textoDe(await c.callTool({ name: 'buscar_en_sitio', arguments: { consulta: 'laboratorio' } })), /grupoeytra\.com\/laboratorio/);
     assert.match(textoDe(await c.callTool({ name: 'catalogo_de_productos', arguments: {} })), /cloro/);
+    await c.callTool({ name: 'catalogo_de_productos', arguments: { orden: 'precio_asc', limite: 5 } });
+    assert.deepEqual(cmsFalso.pedidos.at(-1), { buscar: undefined, orden: 'precio_asc', limite: 5 });
     await c.callTool({ name: 'documentos', arguments: {} });
     assert.deepEqual(asistente.llamadas.at(-1), { metodo: 'GET', ruta: '/knowledge', usuario: undefined, cuerpo: undefined });
     await c.close();

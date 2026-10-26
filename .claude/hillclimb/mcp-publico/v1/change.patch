@@ -1,0 +1,113 @@
+diff --git a/src/herramientas.ts b/src/herramientas.ts
+index 0320f84..eceace7 100644
+--- a/src/herramientas.ts
++++ b/src/herramientas.ts
+@@ -61,10 +61,10 @@ async function seguro(fn: () => Promise<Contenido>): Promise<Contenido> {
+ const LECTURA = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+ 
+ const INSTRUCCIONES = `Servidor de Grupo Eytra (tratamiento y análisis de agua en Cancún, Riviera Maya y Mérida).
+-- Información pública (sin iniciar sesión): use buscar_en_sitio para encontrar la página adecuada y leer_pagina para leerla; datos_de_contacto, catalogo_de_productos, envios_devoluciones_y_pagos, articulos_del_blog y documentos para lo demás.
+-- Datos privados (requieren iniciar sesión con la cuenta del portal de clientes o del CMS): mi_cuenta, estado_de_cuenta, archivos_de_factura, resultados_de_laboratorio, crear_solicitud y, para el equipo de Eytra, resumen_del_dia. Cada persona solo ve los datos de su empresa y lo que su rol permite.
++- Información pública (sin iniciar sesión): para cualquier pregunta sobre servicios, normas, cobertura, cálculos o guías técnicas, empiece por buscar_en_sitio y lea la página con leer_pagina. El sitio tiene recursos propios, como una calculadora de dosificación de cloro: úselos y enlácelos en lugar de calcular por su cuenta. Para lo demás: datos_de_contacto, catalogo_de_productos (acepta orden por precio), envios_devoluciones_y_pagos, articulos_del_blog y documentos.
++- Datos privados (requieren que la persona inicie sesión con la cuenta del portal de clientes o del CMS): mi_cuenta, estado_de_cuenta, archivos_de_factura, resultados_de_laboratorio, crear_solicitud y, para el equipo de Eytra, resumen_del_dia. Cada persona solo ve los datos de su empresa y lo que su rol permite. Si una de estas herramientas falla o la conexión se cierra, casi siempre es porque la persona no ha iniciado sesión: dígale que conecte su cuenta de Grupo Eytra (en Claude, con el botón «Conectar» del conector) y no lo presente como una falla del sistema. No vuelva a intentarlo en el mismo turno.
+ - Los precios del catálogo son de lista con IVA; descuentos solo con una cotización aprobada por Eytra. Para cotizar: https://grupoeytra.com/cotizacion.
+-- Responda en español de México, de usted. No invente cifras: si un dato no está en las herramientas, dígalo.`;
++- Responda en el idioma de la pregunta (español de México, de usted, si es en español). No invente cifras ni políticas: si un dato no está en las herramientas, dígalo. No complete con suposiciones lo que los datos no dicen (plazos de procesamiento, límites para facturar, de qué depende un precio, condiciones por zona); diga lo que sí está y ofrezca confirmarlo con Eytra.`;
+ 
+ export function crearServidor(dep: Dependencias, ctx: Contexto): McpServer {
+   const servidor = new McpServer({ name: 'grupo-eytra', title: 'Grupo Eytra', version: VERSION }, { instructions: INSTRUCCIONES });
+@@ -80,7 +80,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
+     {
+       title: 'Buscar en grupoeytra.com',
+       description:
+-        'Busca páginas del sitio público de Grupo Eytra (servicios, sectores, cobertura, laboratorio, normas NOM, productos, recursos y blog) usando su índice llms.txt. Devuelve título, URL y descripción. Sin consulta devuelve el índice completo y el resumen de la empresa.',
++        'Busca páginas del sitio público de Grupo Eytra usando su índice llms.txt: servicios, sectores, cobertura por ciudad, laboratorio, normas NOM, productos, recursos (calculadora de dosificación de cloro, guías) y artículos del blog. Devuelve título, URL y descripción; después lea la página con leer_pagina. Sin consulta devuelve el índice completo y el resumen de la empresa.',
+       inputSchema: z.object({ consulta: z.string().max(200).optional().describe('Palabras a buscar, por ejemplo "legionella hoteles" o "NOM-245"') }),
+       annotations: LECTURA,
+     },
+@@ -138,11 +138,16 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
+     'catalogo_de_productos',
+     {
+       title: 'Catálogo de productos',
+-      description: 'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Hasta 20 resultados.',
+-      inputSchema: z.object({ buscar: z.string().max(80).optional().describe('Nombre, categoría o palabra del resumen, por ejemplo "cloro" o "bomba"') }),
++      description:
++        'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Devuelve hasta 50 productos, el total que coincide y si hay más; para el más barato o el más caro use orden "precio_asc" o "precio_desc" en una sola llamada.',
++      inputSchema: z.object({
++        buscar: z.string().max(80).optional().describe('Nombre, categoría o palabra del resumen, por ejemplo "cloro" o "bomba"'),
++        orden: z.enum(['destacados', 'precio_asc', 'precio_desc']).optional().describe('destacados (por omisión), precio_asc o precio_desc'),
++        limite: z.number().int().min(1).max(50).optional().describe('Cuántos productos devolver (por omisión 20)'),
++      }),
+       annotations: LECTURA,
+     },
+-    ({ buscar }) => seguro(async () => json(await cms.catalogo(buscar))),
++    ({ buscar, orden, limite }) => seguro(async () => json(await cms.catalogo({ buscar, orden, limite }))),
+   );
+ 
+   servidor.registerTool(
+diff --git a/src/publico/cms.ts b/src/publico/cms.ts
+index e246401..7ac874b 100644
+--- a/src/publico/cms.ts
++++ b/src/publico/cms.ts
+@@ -42,20 +42,30 @@ export class CmsPublico {
+     return { entregas, devoluciones, ajustes: ajustes[0] ?? null };
+   }
+ 
+-  /** Catálogo publicado (la misma vista que lee /catalog de la API), hasta 20 productos. */
+-  async catalogo(buscar?: string) {
+-    const productos = await this.vista(
+-      'shop_catalog',
+-      'slug, name, category, price, sale_mode, recurring_interval, pack_quantity, pack_unit, summary',
+-      (q) => {
+-        let r = q.order('sort_order').order('name').limit(20);
+-        const termino = buscar?.replace(/[%,()*\\]/g, ' ').trim();
+-        if (termino) r = r.or(`name.ilike.%${termino}%,category.ilike.%${termino}%,summary.ilike.%${termino}%`);
+-        return r;
+-      },
+-    );
++  /** Catálogo publicado (la misma vista que lee /catalog de la API), con el total y orden por precio. */
++  async catalogo(opciones: { buscar?: string; orden?: 'destacados' | 'precio_asc' | 'precio_desc'; limite?: number } = {}) {
++    const limite = Math.min(Math.max(opciones.limite ?? 20, 1), 50);
++    const termino = opciones.buscar?.replace(/[%,()*\\]/g, ' ').trim();
++    let consulta = this.supabase
++      .from('shop_catalog')
++      .select('slug, name, category, price, sale_mode, recurring_interval, pack_quantity, pack_unit, summary', { count: 'exact' });
++    if (termino) consulta = consulta.or(`name.ilike.%${termino}%,category.ilike.%${termino}%,summary.ilike.%${termino}%`);
++    if (opciones.orden === 'precio_asc' || opciones.orden === 'precio_desc') {
++      consulta = consulta.order('price', { ascending: opciones.orden === 'precio_asc' }).order('name');
++    } else {
++      consulta = consulta.order('sort_order').order('name');
++    }
++    const { data, error, count } = await consulta.limit(limite).abortSignal(AbortSignal.timeout(8000));
++    if (error) {
++      console.error('[cms] vista pública con error', { nombre: 'shop_catalog', code: error.code, message: error.message });
++      throw new Error('No se pudo leer la información del CMS.');
++    }
++    const productos = data ?? [];
+     return {
+       nota: 'Precios de lista en MXN con IVA incluido; descuentos solo con una cotización aprobada por Eytra.',
++      orden: opciones.orden ?? 'destacados',
++      total: count ?? productos.length,
++      hay_mas: (count ?? 0) > productos.length,
+       productos,
+       tienda: 'https://grupoeytra.com/tienda',
+     };
+diff --git a/src/publico/sitio.ts b/src/publico/sitio.ts
+index 33f4d74..e908806 100644
+--- a/src/publico/sitio.ts
++++ b/src/publico/sitio.ts
+@@ -44,11 +44,13 @@ export function buscarEntradas(entradas: EntradaSitio[], consulta: string, limit
+     .split(/[^a-z0-9ñ-]+/)
+     .filter((p) => p.length > 2);
+   if (palabras.length === 0) return entradas.slice(0, limite);
++  // Raíz de 6 letras para palabras largas: «desinfectarla» encuentra «desinfectar».
++  const raices = palabras.map((p) => (p.length > 6 ? p.slice(0, 6) : p));
+   const puntuadas = entradas.map((e) => {
+     const titulo = normalizar(e.titulo);
+     const resto = normalizar(`${e.descripcion} ${e.seccion} ${e.url}`);
+     let puntos = 0;
+-    for (const p of palabras) {
++    for (const p of raices) {
+       if (titulo.includes(p)) puntos += 3;
+       if (resto.includes(p)) puntos += 1;
+     }

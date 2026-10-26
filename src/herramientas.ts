@@ -61,10 +61,10 @@ async function seguro(fn: () => Promise<Contenido>): Promise<Contenido> {
 const LECTURA = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 
 const INSTRUCCIONES = `Servidor de Grupo Eytra (tratamiento y análisis de agua en Cancún, Riviera Maya y Mérida).
-- Información pública (sin iniciar sesión): use buscar_en_sitio para encontrar la página adecuada y leer_pagina para leerla; datos_de_contacto, catalogo_de_productos, envios_devoluciones_y_pagos, articulos_del_blog y documentos para lo demás.
-- Datos privados (requieren iniciar sesión con la cuenta del portal de clientes o del CMS): mi_cuenta, estado_de_cuenta, archivos_de_factura, resultados_de_laboratorio, crear_solicitud y, para el equipo de Eytra, resumen_del_dia. Cada persona solo ve los datos de su empresa y lo que su rol permite.
+- Información pública (sin iniciar sesión): para cualquier pregunta sobre servicios, normas, cobertura, cálculos o guías técnicas, empiece por buscar_en_sitio y lea la página con leer_pagina. El sitio tiene recursos propios, como una calculadora de dosificación de cloro: úselos y enlácelos en lugar de calcular por su cuenta. Para lo demás: datos_de_contacto, catalogo_de_productos (acepta orden por precio), envios_devoluciones_y_pagos, articulos_del_blog y documentos.
+- Datos privados (requieren que la persona inicie sesión con la cuenta del portal de clientes o del CMS): mi_cuenta, estado_de_cuenta, archivos_de_factura, resultados_de_laboratorio, crear_solicitud y, para el equipo de Eytra, resumen_del_dia. Cada persona solo ve los datos de su empresa y lo que su rol permite. Si una de estas herramientas falla o la conexión se cierra, casi siempre es porque la persona no ha iniciado sesión: dígale que conecte su cuenta de Grupo Eytra (en Claude, con el botón «Conectar» del conector) y no lo presente como una falla del sistema. No vuelva a intentarlo en el mismo turno.
 - Los precios del catálogo son de lista con IVA; descuentos solo con una cotización aprobada por Eytra. Para cotizar: https://grupoeytra.com/cotizacion.
-- Responda en español de México, de usted. No invente cifras: si un dato no está en las herramientas, dígalo.`;
+- Responda en el idioma de la pregunta (español de México, de usted, si es en español). No invente cifras ni políticas: si un dato no está en las herramientas, dígalo. No complete con suposiciones lo que los datos no dicen (plazos de procesamiento, límites para facturar, de qué depende un precio, condiciones por zona); diga lo que sí está y ofrezca confirmarlo con Eytra.`;
 
 export function crearServidor(dep: Dependencias, ctx: Contexto): McpServer {
   const servidor = new McpServer({ name: 'grupo-eytra', title: 'Grupo Eytra', version: VERSION }, { instructions: INSTRUCCIONES });
@@ -80,7 +80,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
     {
       title: 'Buscar en grupoeytra.com',
       description:
-        'Busca páginas del sitio público de Grupo Eytra (servicios, sectores, cobertura, laboratorio, normas NOM, productos, recursos y blog) usando su índice llms.txt. Devuelve título, URL y descripción. Sin consulta devuelve el índice completo y el resumen de la empresa.',
+        'Busca páginas del sitio público de Grupo Eytra usando su índice llms.txt: servicios, sectores, cobertura por ciudad, laboratorio, normas NOM, productos, recursos (calculadora de dosificación de cloro, guías) y artículos del blog. Devuelve título, URL y descripción; después lea la página con leer_pagina. Sin consulta devuelve el índice completo y el resumen de la empresa.',
       inputSchema: z.object({ consulta: z.string().max(200).optional().describe('Palabras a buscar, por ejemplo "legionella hoteles" o "NOM-245"') }),
       annotations: LECTURA,
     },
@@ -138,11 +138,16 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
     'catalogo_de_productos',
     {
       title: 'Catálogo de productos',
-      description: 'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Hasta 20 resultados.',
-      inputSchema: z.object({ buscar: z.string().max(80).optional().describe('Nombre, categoría o palabra del resumen, por ejemplo "cloro" o "bomba"') }),
+      description:
+        'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Devuelve hasta 50 productos, el total que coincide y si hay más; para el más barato o el más caro use orden "precio_asc" o "precio_desc" en una sola llamada.',
+      inputSchema: z.object({
+        buscar: z.string().max(80).optional().describe('Nombre, categoría o palabra del resumen, por ejemplo "cloro" o "bomba"'),
+        orden: z.enum(['destacados', 'precio_asc', 'precio_desc']).optional().describe('destacados (por omisión), precio_asc o precio_desc'),
+        limite: z.number().int().min(1).max(50).optional().describe('Cuántos productos devolver (por omisión 20)'),
+      }),
       annotations: LECTURA,
     },
-    ({ buscar }) => seguro(async () => json(await cms.catalogo(buscar))),
+    ({ buscar, orden, limite }) => seguro(async () => json(await cms.catalogo({ buscar, orden, limite }))),
   );
 
   servidor.registerTool(

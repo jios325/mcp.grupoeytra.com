@@ -44,11 +44,13 @@ export function buscarEntradas(entradas: EntradaSitio[], consulta: string, limit
     .split(/[^a-z0-9ñ-]+/)
     .filter((p) => p.length > 2);
   if (palabras.length === 0) return entradas.slice(0, limite);
+  // Raíz de 6 letras para palabras largas: «desinfectarla» encuentra «desinfectar».
+  const raices = palabras.map((p) => (p.length > 6 ? p.slice(0, 6) : p));
   const puntuadas = entradas.map((e) => {
     const titulo = normalizar(e.titulo);
     const resto = normalizar(`${e.descripcion} ${e.seccion} ${e.url}`);
     let puntos = 0;
-    for (const p of palabras) {
+    for (const p of raices) {
       if (titulo.includes(p)) puntos += 3;
       if (resto.includes(p)) puntos += 1;
     }
