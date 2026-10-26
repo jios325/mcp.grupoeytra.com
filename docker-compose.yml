@@ -1,0 +1,24 @@
+# Solo en servidores (en local: npm run dev). Apache hace HTTPS para mcp.grupoeytra.com y reenvía a 127.0.0.1:8330.
+services:
+  mcp:
+    build: .
+    image: eytra-mcp:prod
+    container_name: eytra-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      MCP_DB_PATH: /app/data/mcp.sqlite
+    ports:
+      - "127.0.0.1:8330:8330"
+    volumes:
+      - mcp_datos:/app/data
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  mcp_datos:
