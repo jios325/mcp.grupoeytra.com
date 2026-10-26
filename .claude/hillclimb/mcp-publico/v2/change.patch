@@ -1,0 +1,62 @@
+diff --git a/src/herramientas.ts b/src/herramientas.ts
+index eceace7..df82874 100644
+--- a/src/herramientas.ts
++++ b/src/herramientas.ts
+@@ -58,6 +58,11 @@ async function seguro(fn: () => Promise<Contenido>): Promise<Contenido> {
+   }
+ }
+ 
++// Indicaciones que viajan en la descripción de cada herramienta: no todos los clientes MCP pasan al
++// modelo las instrucciones del servidor (en la evaluación v1, el conector de la API no las aplicó).
++const SOLO_DATOS = ' Responda solo con lo que devuelve: no agregue plazos, condiciones ni consecuencias que no aparezcan (por ejemplo, que un pedido se procesa el mismo día o hasta cuándo se puede facturar); si falta un dato, dígalo y ofrezca confirmarlo con Eytra.';
++const SOLO_SITIO = ' Cite solo lo que dice el sitio: no agregue cifras, dosis ni recomendaciones de otra fuente presentándolas como de Grupo Eytra. El sitio está en español; responda en el idioma de la pregunta.';
++
+ const LECTURA = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+ 
+ const INSTRUCCIONES = `Servidor de Grupo Eytra (tratamiento y análisis de agua en Cancún, Riviera Maya y Mérida).
+@@ -80,7 +85,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
+     {
+       title: 'Buscar en grupoeytra.com',
+       description:
+-        'Busca páginas del sitio público de Grupo Eytra usando su índice llms.txt: servicios, sectores, cobertura por ciudad, laboratorio, normas NOM, productos, recursos (calculadora de dosificación de cloro, guías) y artículos del blog. Devuelve título, URL y descripción; después lea la página con leer_pagina. Sin consulta devuelve el índice completo y el resumen de la empresa.',
++        'Busca páginas del sitio público de Grupo Eytra usando su índice llms.txt: servicios, sectores, cobertura por ciudad, laboratorio, normas NOM, productos, recursos (calculadora de dosificación de cloro, guías) y artículos del blog. Devuelve título, URL y descripción; después lea la página con leer_pagina. Sin consulta devuelve el índice completo y el resumen de la empresa. Úsela primero en preguntas técnicas o de cálculo: el sitio tiene una calculadora de dosificación de cloro; enlácela en lugar de calcular por su cuenta.' + SOLO_SITIO,
+       inputSchema: z.object({ consulta: z.string().max(200).optional().describe('Palabras a buscar, por ejemplo "legionella hoteles" o "NOM-245"') }),
+       annotations: LECTURA,
+     },
+@@ -98,7 +103,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
+     {
+       title: 'Leer una página del sitio',
+       description:
+-        'Devuelve el texto de una página de grupoeytra.com (ruta como "/laboratorio" o URL completa del mismo sitio). Si la página es larga, la respuesta trae continuar_desde para pedir el siguiente tramo.',
++        'Devuelve el texto de una página de grupoeytra.com (ruta como "/laboratorio" o URL completa del mismo sitio). Si la página es larga, la respuesta trae continuar_desde para pedir el siguiente tramo.' + SOLO_SITIO,
+       inputSchema: z.object({
+         ruta: z.string().min(1).max(500).describe('Ruta o URL de grupoeytra.com'),
+         desde: z.number().int().min(0).max(2_000_000).optional().describe('Carácter desde el que continuar (valor de continuar_desde)'),
+@@ -139,7 +144,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
+     {
+       title: 'Catálogo de productos',
+       description:
+-        'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Devuelve hasta 50 productos, el total que coincide y si hay más; para el más barato o el más caro use orden "precio_asc" o "precio_desc" en una sola llamada.',
++        'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Devuelve hasta 50 productos, el total que coincide y si hay más; para el más barato o el más caro use orden "precio_asc" o "precio_desc" en una sola llamada.' + SOLO_DATOS,
+       inputSchema: z.object({
+         buscar: z.string().max(80).optional().describe('Nombre, categoría o palabra del resumen, por ejemplo "cloro" o "bomba"'),
+         orden: z.enum(['destacados', 'precio_asc', 'precio_desc']).optional().describe('destacados (por omisión), precio_asc o precio_desc'),
+@@ -154,7 +159,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
+     'envios_devoluciones_y_pagos',
+     {
+       title: 'Envíos, devoluciones y pagos de la tienda',
+-      description: 'Formas de entrega (cobertura, costo, envío gratis, tiempos, si llevan químicos), políticas de devolución, hora de corte, formas de pago y facturación de la tienda en línea.',
++      description: 'Formas de entrega (cobertura, costo, envío gratis, tiempos, si llevan químicos), políticas de devolución, hora de corte, formas de pago y facturación de la tienda en línea.' + SOLO_DATOS,
+       inputSchema: z.object({}),
+       annotations: LECTURA,
+     },
+@@ -247,7 +252,8 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
+       if (!persona?.ok) return fallo(persona?.error ?? 'No se pudo verificar su cuenta.');
+       return fn(ctx.usuarioId);
+     });
+-  const sesion = ' Requiere iniciar sesión.';
++  const sesion =
++    ' Requiere que la persona haya iniciado sesión con su cuenta de Grupo Eytra. Si falla o la conexión se cierra, es porque no la ha iniciado: dígale que conecte su cuenta (en Claude, con el botón «Conectar» del conector) y ofrezca el teléfono 999 548 5336; no lo presente como una falla del sistema ni lo vuelva a intentar en el mismo turno.';
+ 
+   if (disponible('mi_cuenta')) {
+     servidor.registerTool(
