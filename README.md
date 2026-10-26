@@ -73,6 +73,8 @@ claude mcp add --transport http grupo-eytra https://mcp.grupoeytra.com/mcp
 
 ## Producción (Docker en el droplet)
 
+Paso a paso de la primera instalación y de las actualizaciones en [docs/despliegue.md](docs/despliegue.md).
+
 ```bash
 cp .env.example .env    # MCP_PUBLIC_URL=https://mcp.grupoeytra.com, CLIENT_IP_HEADER=x-forwarded-for, URLs de producción y una llave «MCP» de producción
 docker compose up -d --build
