@@ -5,3 +5,10 @@ data/
 .env.*
 !.env.example
 *.log
+
+# Evaluaciones (.claude/hillclimb): transcripciones y reportes se regeneran al correrlas
+**/traces/
+.claude/hillclimb/**/report.html
+.claude/hillclimb/**/state.json
+.claude/hillclimb/**/trajectory/
+.claude/hillclimb/**/progress.txt

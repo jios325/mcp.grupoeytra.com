@@ -1,0 +1,202 @@
+[
+  {
+    "id": "legionella-hoteles",
+    "tags": ["servicios", "laboratorio"],
+    "pregunta": "¿Hacen análisis de Legionella para hoteles? ¿Cuánto tardan los resultados?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)legionella", "10", "14"],
+    "criterio": "Confirma que sí hacen análisis de Legionella para hoteles y da el plazo de resultados que aparece en el sitio (10 a 14 días)."
+  },
+  {
+    "id": "alberca-norma",
+    "tags": ["normas", "laboratorio"],
+    "pregunta": "¿Qué norma aplica al agua de las albercas de un hotel y ustedes la analizan?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["NOM-245"],
+    "criterio": "Nombra la NOM-245-SSA1-2010 y confirma que Eytra analiza agua de albercas."
+  },
+  {
+    "id": "hielo-norma",
+    "tags": ["normas", "laboratorio"],
+    "pregunta": "Necesito analizar el hielo de mi restaurante, ¿con qué norma lo hacen?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["NOM-201"],
+    "criterio": "Indica la NOM-201-SSA1-2015 para agua y hielo para consumo y que Eytra hace ese análisis."
+  },
+  {
+    "id": "distintivo-h",
+    "tags": ["servicios", "laboratorio"],
+    "pregunta": "¿Ustedes me pueden dar el Distintivo H para mi restaurante?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)sectur|secretar[ií]a de turismo"],
+    "criterio": "Aclara que Grupo Eytra NO otorga el Distintivo H (lo otorga SECTUR) y que sí hace los análisis de alimentos, superficies, hielo y agua para tramitarlo."
+  },
+  {
+    "id": "descargas-semarnat",
+    "tags": ["normas", "laboratorio"],
+    "pregunta": "Mi planta descarga agua residual al drenaje municipal, ¿qué norma me aplica y la pueden analizar?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["NOM-002"],
+    "criterio": "Indica la NOM-002-SEMARNAT para descargas al alcantarillado municipal y que Eytra hace el análisis."
+  },
+  {
+    "id": "cofepris-validez",
+    "tags": ["servicios", "laboratorio"],
+    "pregunta": "¿Los resultados de su laboratorio me sirven para una inspección de COFEPRIS?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)cofepris"],
+    "criterio": "Responde con lo que dice el sitio sobre la validez de los reportes ante COFEPRIS (muestreo con cadena de custodia, métodos de las normas) sin prometer más de lo que dice."
+  },
+  {
+    "id": "torres-enfriamiento",
+    "tags": ["servicios", "tratamiento"],
+    "pregunta": "Tengo problemas de incrustación en las torres de enfriamiento del hotel. ¿Qué me ofrecen?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)torre"],
+    "criterio": "Describe el tratamiento químico de torres de enfriamiento (antiincrustantes, línea BM u otros productos que aparezcan en el sitio) y ofrece cotizar o contactar."
+  },
+  {
+    "id": "iguala-mensual",
+    "tags": ["servicios", "tratamiento"],
+    "pregunta": "¿Tienen algún plan mensual con precio fijo para hoteles? ¿Qué incluye?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)mensual|iguala"],
+    "criterio": "Describe la iguala o programa mensual (análisis programados, químicos, visitas técnicas, reportes) según el sitio, y no inventa un precio fijo si el sitio no lo da."
+  },
+  {
+    "id": "cobertura-tulum",
+    "tags": ["cobertura"],
+    "pregunta": "¿Dan servicio en Tulum?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)tulum"],
+    "criterio": "Confirma que sí atienden Tulum, con lo que diga el sitio."
+  },
+  {
+    "id": "cobertura-merida",
+    "tags": ["cobertura"],
+    "pregunta": "Somos una industria en Mérida, ¿nos pueden atender?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)m[ée]rida"],
+    "criterio": "Confirma que atienden Mérida (industria, hoteles u hospitales en Yucatán) con lo que diga el sitio."
+  },
+  {
+    "id": "cobertura-holbox",
+    "tags": ["cobertura", "trampa"],
+    "pregunta": "¿Pueden venir a tomar muestras a Holbox?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina", "datos_de_contacto"],
+    "debe_contener": [],
+    "criterio": "No afirma que atienden Holbox si el sitio no lo dice; indica que hay que confirmarlo con Eytra y da un medio de contacto."
+  },
+  {
+    "id": "contacto",
+    "tags": ["contacto"],
+    "pregunta": "¿Cuál es su teléfono, su correo y en qué horario atienden?",
+    "herramientas": ["datos_de_contacto"],
+    "debe_contener": ["548\\s?5336", "contacto@grupoeytra\\.com", "8"],
+    "criterio": "Da el teléfono (999 548 5336), el correo contacto@grupoeytra.com y el horario de lunes a viernes de 8:00 a 18:00."
+  },
+  {
+    "id": "direccion",
+    "tags": ["contacto"],
+    "pregunta": "¿Dónde están sus oficinas? Quiero ir a dejar una muestra.",
+    "herramientas": ["datos_de_contacto", "buscar_en_sitio", "leer_pagina", "envios_devoluciones_y_pagos"],
+    "debe_contener": ["(?i)nichupt"],
+    "criterio": "Da la dirección en Av. Nichupté, Cancún, sin inventar datos que no aparezcan (referencias, horarios de recepción de muestras distintos a los publicados)."
+  },
+  {
+    "id": "cotizar",
+    "tags": ["contacto"],
+    "pregunta": "Quiero una cotización para analizar el agua de 3 albercas, ¿cómo la pido?",
+    "herramientas": ["datos_de_contacto", "buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)grupoeytra\\.com/cotizacion|548\\s?5336|whatsapp"],
+    "criterio": "Indica cómo cotizar (formulario https://grupoeytra.com/cotizacion, teléfono o WhatsApp) y no inventa un precio para las 3 albercas."
+  },
+  {
+    "id": "cloro-precio",
+    "tags": ["tienda"],
+    "pregunta": "¿Venden hipoclorito de sodio? ¿Cuánto cuesta?",
+    "herramientas": ["catalogo_de_productos"],
+    "debe_contener": ["(?i)hipoclorito|cloro"],
+    "criterio": "Usa el catálogo: si hay hipoclorito o cloro publicado, da su precio de lista con IVA y presentación tal como aparece; si no está en el catálogo, lo dice y ofrece cotizar."
+  },
+  {
+    "id": "producto-mas-barato",
+    "tags": ["tienda"],
+    "pregunta": "¿Cuál es el producto más barato de su tienda en línea?",
+    "herramientas": ["catalogo_de_productos"],
+    "debe_contener": ["\\$\\s?\\d"],
+    "criterio": "Da el producto de menor precio del catálogo publicado con su precio; si la consulta no garantiza ver todo el catálogo, lo advierte."
+  },
+  {
+    "id": "envio-gratis",
+    "tags": ["tienda"],
+    "pregunta": "Si compro en su tienda y vivo en Playa del Carmen, ¿cuánto cuesta el envío? ¿Desde cuánto es gratis?",
+    "herramientas": ["envios_devoluciones_y_pagos"],
+    "debe_contener": ["99", "800"],
+    "criterio": "Da el costo de la entrega local ($99) y el monto desde el que es gratis ($800) según la configuración publicada de la tienda, y confirma que Playa del Carmen está en la cobertura."
+  },
+  {
+    "id": "devoluciones",
+    "tags": ["tienda"],
+    "pregunta": "¿Puedo devolver un químico que compré si ya lo abrí?",
+    "herramientas": ["envios_devoluciones_y_pagos"],
+    "debe_contener": [],
+    "criterio": "Responde con la política de devoluciones publicada para químicos o productos abiertos, sin inventar condiciones."
+  },
+  {
+    "id": "pagos-factura",
+    "tags": ["tienda"],
+    "pregunta": "¿Qué formas de pago aceptan en la tienda y me pueden facturar?",
+    "herramientas": ["envios_devoluciones_y_pagos"],
+    "debe_contener": ["(?i)factura"],
+    "criterio": "Da las formas de pago y cómo se pide la factura según la configuración publicada de la tienda."
+  },
+  {
+    "id": "blog-calderas",
+    "tags": ["contenido"],
+    "pregunta": "¿Tienen algún artículo sobre qué parámetros controlar en el agua de calderas?",
+    "herramientas": ["buscar_en_sitio", "articulos_del_blog", "leer_pagina"],
+    "debe_contener": ["(?i)grupoeytra\\.com/blog/tratamiento-agua-calderas"],
+    "criterio": "Encuentra y enlaza el artículo del blog sobre parámetros de control del agua de calderas y resume de qué trata."
+  },
+  {
+    "id": "calculadora-cloro",
+    "tags": ["contenido"],
+    "pregunta": "¿Cuánto cloro al 13% le pongo a una cisterna de 10,000 litros para desinfectarla?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)calculadora|grupoeytra\\.com/recursos"],
+    "criterio": "Se apoya en la calculadora de dosificación del sitio (la enlaza) o en el método que explica; si da una cifra, sale de lo que dice el sitio y no de un cálculo sin fuente."
+  },
+  {
+    "id": "saldo-sin-sesion",
+    "tags": ["privado"],
+    "pregunta": "¿Cuánto debe mi empresa? Quiero ver mis facturas pendientes.",
+    "herramientas": ["estado_de_cuenta"],
+    "debe_contener": [],
+    "criterio": "No inventa saldos ni facturas; explica que esa información requiere iniciar sesión con la cuenta de Grupo Eytra (o conectar el conector) y, si ayuda, ofrece el contacto."
+  },
+  {
+    "id": "resultados-sin-sesion",
+    "tags": ["privado"],
+    "pregunta": "¿Ya salieron los resultados del análisis de la alberca de mi hotel?",
+    "herramientas": ["resultados_de_laboratorio"],
+    "debe_contener": [],
+    "criterio": "No inventa resultados; explica que hace falta iniciar sesión con su cuenta para ver resultados de su empresa."
+  },
+  {
+    "id": "fuera-de-alcance",
+    "tags": ["trampa"],
+    "pregunta": "¿Me recomiendan un buen plomero en Monterrey para arreglar una fuga?",
+    "herramientas": [],
+    "debe_contener": [],
+    "criterio": "Dice que eso está fuera de lo que ofrece Grupo Eytra (tratamiento y análisis de agua en Cancún, Riviera Maya y Mérida) sin inventar recomendaciones."
+  },
+  {
+    "id": "pregunta-en-ingles",
+    "tags": ["idioma"],
+    "pregunta": "Do you test pool water for hotels in Playa del Carmen?",
+    "herramientas": ["buscar_en_sitio", "leer_pagina"],
+    "debe_contener": ["(?i)pool|NOM-245"],
+    "criterio": "Responde en inglés (el idioma de la pregunta), confirma el análisis de agua de alberca para hoteles en Playa del Carmen según el sitio."
+  }
+]

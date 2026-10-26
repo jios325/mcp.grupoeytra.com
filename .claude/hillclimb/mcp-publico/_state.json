@@ -1,0 +1,62 @@
+{
+  "metrics": [
+    {
+      "id": "aprobada",
+      "label": "Aprobada",
+      "kind": "binary"
+    },
+    {
+      "id": "cumple",
+      "label": "Cumple",
+      "kind": "binary"
+    },
+    {
+      "id": "sin_inventar",
+      "label": "Sin inventar",
+      "kind": "binary"
+    },
+    {
+      "id": "herramienta",
+      "label": "Herramienta",
+      "kind": "binary"
+    },
+    {
+      "id": "hechos",
+      "label": "Hechos",
+      "kind": "float",
+      "scale": 1
+    }
+  ],
+  "perf_fields": [
+    {
+      "id": "cost_usd",
+      "label": "Costo",
+      "unit": "USD"
+    },
+    {
+      "id": "latency_s",
+      "label": "Tiempo",
+      "unit": "s"
+    },
+    {
+      "id": "tool_calls",
+      "label": "Llamadas"
+    },
+    {
+      "id": "palabras",
+      "label": "Palabras"
+    },
+    {
+      "id": "in_tokens",
+      "label": "Tokens in"
+    },
+    {
+      "id": "out_tokens",
+      "label": "Tokens out"
+    }
+  ],
+  "harness_paths": [
+    "eval/casos.json"
+  ],
+  "harness_sha": "d645f6709eda28da260b6fbe9899dfa357de0f7a888d808dab18201abadc1c1d"
+}
