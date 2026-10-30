@@ -5,7 +5,7 @@ import { Almacen } from '../src/auth/almacen.js';
 import { redirectRegistrado, redirectValido, s256 } from '../src/auth/oauth.js';
 import { Tokens } from '../src/auth/tokens.js';
 import { esProtegida } from '../src/herramientas.js';
-import { buscarEntradas, extraerTexto, leerLlmsTxt, Sitio } from '../src/publico/sitio.js';
+import { articulosDelIndice, buscarEntradas, extraerTexto, leerLlmsTxt, Sitio } from '../src/publico/sitio.js';
 
 const HOSTS = ['claude.ai', 'claude.com'];
 
@@ -38,6 +38,24 @@ test('llms.txt: lee enlaces con su sección y busca sin acentos', () => {
   assert.deepEqual(buscarEntradas(entradas, 'tornillos'), []);
   // Raíz de 6 letras: «microbiológico» (sin la «s») encuentra «microbiológicos».
   assert.equal(buscarEntradas(entradas, 'microbiologico')[0]?.url, 'https://grupoeytra.com/laboratorio');
+});
+
+test('artículos del blog desde llms.txt: solo /blog/<slug>', () => {
+  const entradas = leerLlmsTxt(`${LLMS}
+## English pages
+
+- [Cooling tower guide](https://grupoeytra.com/en/blog/cooling-tower-guide): in English.
+
+## Optional
+
+- [Blog](https://grupoeytra.com/blog): todos los artículos técnicos.
+`);
+  const articulos = articulosDelIndice(entradas);
+  assert.deepEqual(
+    articulos.map((a) => a.slug),
+    ['prevencion-legionella-hoteles-guia-completa'],
+  );
+  assert.equal(buscarEntradas(articulos, 'legionella')[0]?.slug, 'prevencion-legionella-hoteles-guia-completa');
 });
 
 test('leer páginas: solo el dominio del sitio', () => {

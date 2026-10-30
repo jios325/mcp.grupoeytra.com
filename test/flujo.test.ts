@@ -72,13 +72,33 @@ class CmsFalso extends CmsPublico {
     const productos = [{ slug: 'cloro', name: 'Cloro', category: 'quimicos', price: 100, sale_mode: 'shipping', recurring_interval: null, pack_quantity: 1, pack_unit: 'L', summary: null }];
     return { nota: 'Precios de lista', orden: opciones.orden ?? 'destacados', total: 1, hay_mas: false, productos, tienda: 'https://grupoeytra.com/tienda' } as Awaited<ReturnType<CmsPublico['catalogo']>>;
   }
+  // Como en producción hoy: el blog no está en el CMS.
+  override async articulos() {
+    return [];
+  }
+  override async articulo() {
+    return null;
+  }
+  override async temasBlog() {
+    return [];
+  }
 }
 
 const cmsFalso = new CmsFalso({ supabaseUrl: 'http://supabase.invalid', supabaseLlavePublicable: 'x' });
 
 class SitioFalso extends Sitio {
   override async indiceSitio() {
-    return { resumen: '# Grupo Eytra', entradas: [{ titulo: 'Laboratorio', url: 'https://grupoeytra.com/laboratorio', descripcion: 'análisis', seccion: 'Lab' }] };
+    return {
+      resumen: '# Grupo Eytra',
+      entradas: [
+        { titulo: 'Laboratorio', url: 'https://grupoeytra.com/laboratorio', descripcion: 'análisis', seccion: 'Lab' },
+        { titulo: 'Agua de calderas', url: 'https://grupoeytra.com/blog/agua-calderas', descripcion: 'tratamiento interno', seccion: 'Guías técnicas del blog' },
+      ],
+    };
+  }
+  override async leerPagina(rutaOUrl: string) {
+    if (rutaOUrl !== '/blog/agua-calderas') return { ok: false as const, error: 'La página no existe en el sitio.' };
+    return { ok: true as const, url: 'https://grupoeytra.com/blog/agua-calderas', titulo: 'Agua de calderas', descripcion: '', texto: '# Agua de calderas', largo_total: 18 };
   }
 }
 
@@ -241,6 +261,12 @@ describe('sin sesión', () => {
     assert.match(textoDe(await c.callTool({ name: 'catalogo_de_productos', arguments: {} })), /cloro/);
     await c.callTool({ name: 'catalogo_de_productos', arguments: { orden: 'precio_asc', limite: 5 } });
     assert.deepEqual(cmsFalso.pedidos.at(-1), { buscar: undefined, orden: 'precio_asc', limite: 5 });
+    // Blog: con el CMS vacío lista desde llms.txt y lee la página del sitio.
+    const blog = JSON.parse(textoDe(await c.callTool({ name: 'articulos_del_blog', arguments: { buscar: 'calderas' } })));
+    assert.deepEqual(blog.articulos, [{ slug: 'agua-calderas', title: 'Agua de calderas', excerpt: 'tratamiento interno', url: 'https://grupoeytra.com/blog/agua-calderas' }]);
+    assert.match(textoDe(await c.callTool({ name: 'leer_articulo', arguments: { slug: 'agua-calderas' } })), /# Agua de calderas/);
+    const sinArticulo = await c.callTool({ name: 'leer_articulo', arguments: { slug: 'no-existe' } });
+    assert.equal(sinArticulo.isError, true);
     await c.callTool({ name: 'documentos', arguments: {} });
     assert.deepEqual(asistente.llamadas.at(-1), { metodo: 'GET', ruta: '/knowledge', usuario: undefined, cuerpo: undefined });
     await c.close();

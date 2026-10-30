@@ -39,7 +39,7 @@ export function leerLlmsTxt(texto: string): EntradaSitio[] {
 }
 
 /** Puntúa cada entrada por las palabras de la consulta presentes en título, descripción y ruta. */
-export function buscarEntradas(entradas: EntradaSitio[], consulta: string, limite = 10): EntradaSitio[] {
+export function buscarEntradas<T extends EntradaSitio>(entradas: T[], consulta: string, limite = 10): T[] {
   const palabras = normalizar(consulta)
     .split(/[^a-z0-9ñ-]+/)
     .filter((p) => p.length > 2);
@@ -61,6 +61,17 @@ export function buscarEntradas(entradas: EntradaSitio[], consulta: string, limit
     .sort((a, b) => b.puntos - a.puntos)
     .slice(0, limite)
     .map((x) => x.e);
+}
+
+/**
+ * Artículos del blog según llms.txt (rutas /blog/<slug>, sin las páginas en inglés ni el índice).
+ * El sitio compila el blog desde Markdown en su repo; esto cubre lo que la vista del CMS aún no tiene.
+ */
+export function articulosDelIndice(entradas: EntradaSitio[]): (EntradaSitio & { slug: string })[] {
+  return entradas.flatMap((e) => {
+    const ruta = /^\/blog\/([a-z0-9]+(?:-[a-z0-9]+)*)\/?$/.exec(URL.canParse(e.url) ? new URL(e.url).pathname : '');
+    return ruta ? [{ ...e, slug: ruta[1]! }] : [];
+  });
 }
 
 export class Sitio {

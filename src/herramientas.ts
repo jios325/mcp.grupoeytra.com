@@ -3,7 +3,7 @@ import * as z from 'zod/v4';
 
 import type { ClienteAsistente, Persona, Resultado } from './asistente.js';
 import type { CmsPublico } from './publico/cms.js';
-import { buscarEntradas, type Sitio } from './publico/sitio.js';
+import { articulosDelIndice, buscarEntradas, type Sitio } from './publico/sitio.js';
 import type { Limitador } from './auth/limitador.js';
 
 // Herramientas del MCP. Hay tres alcances, los mismos de la API del asistente:
@@ -170,7 +170,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
     'articulos_del_blog',
     {
       title: 'Artículos del blog',
-      description: 'Lista los artículos técnicos publicados en el blog (más recientes primero) y los temas disponibles. Para leer uno completo use leer_articulo con su slug.',
+      description: 'Lista los artículos técnicos publicados en el blog con su slug, título, extracto y URL. Para leer uno completo use leer_articulo con su slug.',
       inputSchema: z.object({
         buscar: z.string().max(80).optional().describe('Palabra en el título, extracto o resumen'),
         tema: z.string().max(80).optional().describe('Slug del tema'),
@@ -180,8 +180,21 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
     },
     ({ buscar, tema, limite }) =>
       seguro(async () => {
-        const [articulos, temas] = await Promise.all([cms.articulos({ buscar, tema, limite }), cms.temasBlog()]);
-        return json({ articulos, temas, url_blog: 'https://grupoeytra.com/blog' });
+        const [articulos, temas] = await Promise.allSettled([cms.articulos({ buscar, tema, limite }), cms.temasBlog()]);
+        const conTemas = temas.status === 'fulfilled' ? { temas: temas.value } : {};
+        if (articulos.status === 'fulfilled' && articulos.value.length > 0) {
+          return json({ articulos: articulos.value, ...conTemas, url_blog: 'https://grupoeytra.com/blog' });
+        }
+        // Respaldo: el sitio publica el blog desde Markdown en su repo, que el CMS aún no tiene; se lista desde llms.txt.
+        const delSitio = articulosDelIndice((await sitio.indiceSitio()).entradas);
+        const consulta = [buscar, tema].filter(Boolean).join(' ');
+        const encontrados = consulta ? buscarEntradas(delSitio, consulta, limite ?? 10) : delSitio.slice(0, limite ?? 10);
+        return json({
+          articulos: encontrados.map((a) => ({ slug: a.slug, title: a.titulo, excerpt: a.descripcion, url: a.url })),
+          ...conTemas,
+          url_blog: 'https://grupoeytra.com/blog',
+          ...(encontrados.length === 0 ? { nota: 'Sin coincidencias; pruebe otras palabras o búsquelo con buscar_en_sitio.' } : {}),
+        });
       }),
   );
 
@@ -189,14 +202,20 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
     'leer_articulo',
     {
       title: 'Leer un artículo del blog',
-      description: 'Texto completo (Markdown) de un artículo publicado del blog, con autor, revisor, normas y productos relacionados.',
+      description:
+        'Texto completo de un artículo publicado del blog (Markdown), con autor, revisor, normas y productos relacionados cuando el CMS los tiene. Si la respuesta trae continuar_desde, pida el resto con leer_pagina y esa URL.' + SOLO_SITIO,
       inputSchema: z.object({ slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(160).describe('Slug del artículo (de articulos_del_blog)') }),
       annotations: LECTURA,
     },
     ({ slug }) =>
       seguro(async () => {
-        const articulo = await cms.articulo(slug);
-        return articulo ? json(articulo) : fallo('No hay un artículo publicado con ese slug.');
+        const articulo = await cms.articulo(slug).catch(() => null);
+        if (articulo) return json(articulo);
+        // Respaldo: la página del artículo en el sitio (mismo motivo que en articulos_del_blog).
+        const pagina = await sitio.leerPagina(`/blog/${slug}`);
+        if (!pagina.ok) return fallo('No hay un artículo publicado con ese slug.');
+        const { ok: _ok, ...resto } = pagina;
+        return json(resto);
       }),
   );
 
