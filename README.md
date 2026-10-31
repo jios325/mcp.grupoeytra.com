@@ -1,6 +1,6 @@
 # mcp.grupoeytra.com
 
-Servidor [MCP](https://modelcontextprotocol.io) de Grupo Eytra. Con él, Claude (claude.ai, Claude Desktop, Claude Code) y otros clientes MCP consultan desde la información pública del sitio hasta los datos de cada usuario del CMS, según su rol.
+Servidor [MCP](https://modelcontextprotocol.io) de Grupo Eytra. Con él, Claude (claude.ai, Claude Desktop, Claude Code), ChatGPT y otros clientes MCP consultan desde la información pública del sitio hasta los datos de cada usuario del CMS, según su rol.
 
 ```
 Claude ──HTTPS──▶ mcp.grupoeytra.com/mcp ─┬─▶ grupoeytra.com (llms.txt y páginas)           público
@@ -33,7 +33,7 @@ La API del asistente confía en el encabezado `X-Eytra-User` porque la llave est
 
 Protecciones adicionales (revisión de seguridad del 26 oct 2026):
 
-- El login solo regresa a `claude.ai`, `claude.com` (`MCP_REDIRECT_HOSTS`) o a `localhost`; así nadie puede registrar un cliente llamado «Claude» que se quede con el código. Para otros clientes MCP, agregar su host a esa variable.
+- El login solo regresa a `claude.ai`, `claude.com`, `chatgpt.com` (`MCP_REDIRECT_HOSTS`) o a `localhost`; así nadie puede registrar un cliente llamado «Claude» que se quede con el código. Para otros clientes MCP, agregar su host a esa variable.
 - Los errores antes del login muestran una página y no redirigen (sin redirecciones abiertas).
 - Límites: por IP en `/authorize`, `/register` y `/token`; por cuenta solo los fallos de contraseña (10 cada 15 min) y de código (5 cada 15 min); 120 llamadas a herramientas cada 15 min por IP sin sesión, y 150 llamadas por hora a la API sin persona en total (la llave tiene 600 por hora en la API para todos).
 - Un 429 o una caída de la API nunca cierra sesiones: solo un 403/404 de `/me` (persona desactivada o sin acceso).
@@ -71,6 +71,10 @@ claude mcp add --transport http grupo-eytra https://mcp.grupoeytra.com/mcp
 
   Luego `/mcp` › grupo-eytra › Authenticate para iniciar sesión.
 
+- **ChatGPT** (web): en https://chatgpt.com/plugins, **+** › **Add custom MCP server**. Nombre «Grupo Eytra», Server URL `https://mcp.grupoeytra.com/mcp` (exacta: es el `resource` que valida el login) y autenticación **OAuth**, sin ID ni secreto de cliente (se registra solo en `/register`). Acepte el aviso, **Create as a plugin**, inicie sesión e instálelo; en el chat se elige con **@**. Si no aparece la opción, puede hacer falta el modo de desarrollador o que el administrador del espacio lo permita.
+  - ChatGPT vuelve a `https://chatgpt.com/connector_platform_oauth_redirect` (el servidor anuncia RFC 9207 y manda `iss`) o a `https://chatgpt.com/connector/oauth/<id>`; ambos entran por `chatgpt.com` en `MCP_REDIRECT_HOSTS`.
+  - Con **OAuth** pide iniciar sesión desde el principio, también para lo público. Para **OAuth or no authentication** ChatGPT espera `securitySchemes` en cada herramienta y `_meta["mcp/www_authenticate"]` en el error, no el `401` que usa Claude; no está implementado.
+
 ## Producción (Docker en el droplet)
 
 Paso a paso de la primera instalación y de las actualizaciones en [docs/despliegue.md](docs/despliegue.md).
@@ -90,7 +94,7 @@ docker compose up -d --build
 - **Por qué un servidor de autorización propio y no el OAuth Server de Supabase**: el de Supabase está en beta, no está documentado para self-hosted, exige una pantalla de consentimiento en el CMS y emite tokens con `aud: authenticated` en lugar de la URL del MCP. Si se adopta más adelante, solo cambia `src/auth/`.
 - **Canal en la bitácora**: la API no tiene canal `mcp`; se usa `other` y la llave «MCP» lo distingue en `assistant_log`. Un canal propio requiere una migración en el CMS (`assistant_channel`).
 - **Super Admin y Finanzas**: hoy no entran (la API los rechaza porque una llave no es un segundo factor). El MCP sí verifica su código TOTP, así que podría habilitarse con un cambio en `assistant_call` que acepte personas verificadas con aal2.
-- **CIMD** (Client ID Metadata Documents): no implementado; Claude usa el registro dinámico (`/register`), que es lo que anuncia el servidor.
+- **CIMD** (Client ID Metadata Documents): no implementado; Claude y ChatGPT usan el registro dinámico (`/register`), que es lo que anuncia el servidor.
 - SDK: `@modelcontextprotocol/server` v2 (spec 2026-07-28) con respaldo sin estado para clientes de la spec 2025.
 
 Licencias de dependencias: MIT o Apache-2.0.

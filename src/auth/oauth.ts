@@ -44,7 +44,7 @@ export interface DependenciasOAuth {
 const esLoopback = (host: string) => host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
 
 /**
- * https solo en los hosts de confianza (por omisión claude.ai y claude.com, MCP_REDIRECT_HOSTS), o http en
+ * https solo en los hosts de confianza (por omisión claude.ai, claude.com y chatgpt.com, MCP_REDIRECT_HOSTS), o http en
  * loopback (Claude Code abre un puerto local). Sin la lista, cualquiera podría registrar un cliente
  * llamado «Claude» que mande el código a su propio servidor y pedir a una víctima que inicie sesión.
  */

@@ -65,7 +65,7 @@ export function leerConfig(): Config {
     secretoTokens,
     rutaBase: opcional('MCP_DB_PATH', './data/mcp.sqlite'),
     encabezadoIp: process.env.CLIENT_IP_HEADER?.trim().toLowerCase() || null,
-    hostsRedirect: opcional('MCP_REDIRECT_HOSTS', 'claude.ai,claude.com')
+    hostsRedirect: opcional('MCP_REDIRECT_HOSTS', 'claude.ai,claude.com,chatgpt.com')
       .split(',')
       .map((h) => h.trim().toLowerCase())
       .filter(Boolean),
