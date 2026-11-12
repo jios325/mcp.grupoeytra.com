@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
-import type { ClienteAsistente, Persona, Resultado } from './asistente.js';
+import type { Aal, ClienteAsistente, Persona, Resultado } from './asistente.js';
 import type { CmsPublico } from './publico/cms.js';
 import { articulosDelIndice, buscarEntradas, type Sitio } from './publico/sitio.js';
 import type { Limitador } from './auth/limitador.js';
@@ -9,7 +11,8 @@ import type { Limitador } from './auth/limitador.js';
 // Herramientas del MCP. Hay tres alcances, los mismos de la API del asistente:
 //   - público: cualquiera, sin sesión (sitio, catálogo, blog, tienda, documentos públicos);
 //   - cliente: usuarios de una empresa cliente (estado de cuenta, facturas, resultados, solicitudes);
-//   - equipo: personal de Eytra sin doble factor obligatorio (resumen del día, documentos internos).
+//   - equipo: personal de Eytra (resumen del día, documentos internos y, con Editar en Cotizaciones, cotizar).
+//     Super Admin entra solo si pasó su app de autenticación al iniciar sesión (aal2); Finanzas, no.
 // Sin sesión se anuncian todas, para que la aplicación sepa que existen y pida iniciar sesión al
 // llamarlas (lazy auth: servidor.ts responde 401 antes de llegar aquí). Con sesión solo se anuncian las
 // que la API dice que le tocan a esa persona (`/me`), y la API vuelve a comprobarlo en cada llamada.
@@ -24,6 +27,8 @@ export const PROTEGIDAS = {
   resultados_de_laboratorio: 'lab_results',
   crear_solicitud: 'create_request',
   resumen_del_dia: 'daily_summary',
+  crear_cotizacion: 'create_quote',
+  estado_de_cotizacion: 'quote_status',
 } as const;
 
 export type HerramientaProtegida = keyof typeof PROTEGIDAS;
@@ -31,6 +36,8 @@ export const esProtegida = (nombre: unknown): nombre is HerramientaProtegida => 
 
 export interface Contexto {
   usuarioId: string | null;
+  /** Doble factor de la sesión (aal2 si pasó su app de autenticación al iniciar sesión). */
+  aal: Aal;
   /** Resultado de /me para la persona con sesión (null sin sesión). */
   persona: Resultado<Persona> | null;
 }
@@ -228,7 +235,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
       inputSchema: z.object({}),
       annotations: LECTURA,
     },
-    () => seguro(async () => conCupo(ctx, dep, () => asistente.llamar('GET', '/knowledge', { usuario: usuarioConAcceso(ctx) }))),
+    () => seguro(async () => conCupo(ctx, dep, () => asistente.llamar('GET', '/knowledge', { usuario: usuarioConAcceso(ctx), aal: ctx.aal }))),
   );
 
   servidor.registerTool(
@@ -239,7 +246,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
       inputSchema: z.object({ id: z.uuid().describe('id del documento (de la herramienta documentos)') }),
       annotations: LECTURA,
     },
-    ({ id }) => seguro(async () => conCupo(ctx, dep, () => asistente.llamar('GET', `/knowledge/${id}`, { usuario: usuarioConAcceso(ctx) }))),
+    ({ id }) => seguro(async () => conCupo(ctx, dep, () => asistente.llamar('GET', `/knowledge/${id}`, { usuario: usuarioConAcceso(ctx), aal: ctx.aal }))),
   );
 }
 
@@ -296,7 +303,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
         inputSchema: z.object({}),
         annotations: LECTURA,
       },
-      () => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', '/account', { usuario: u }))),
+      () => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', '/account', { usuario: u, aal: ctx.aal }))),
     );
   }
 
@@ -309,7 +316,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
         inputSchema: z.object({ folio: z.string().trim().min(1).max(60).regex(/^[A-Za-z0-9-]+$/).describe('Folio (A-123) o UUID fiscal') }),
         annotations: LECTURA,
       },
-      ({ folio }) => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', `/invoices/${encodeURIComponent(folio)}/files`, { usuario: u }))),
+      ({ folio }) => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', `/invoices/${encodeURIComponent(folio)}/files`, { usuario: u, aal: ctx.aal }))),
     );
   }
 
@@ -322,7 +329,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
         inputSchema: z.object({ propiedad: z.string().max(80).optional().describe('Nombre (o parte) de la propiedad') }),
         annotations: LECTURA,
       },
-      ({ propiedad }) => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', '/results', { usuario: u, consulta: { property: propiedad?.trim() } }))),
+      ({ propiedad }) => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', '/results', { usuario: u, aal: ctx.aal, consulta: { property: propiedad?.trim() } }))),
     );
   }
 
@@ -347,6 +354,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
           desdeApi(
             await asistente.llamar('POST', '/requests', {
               usuario: u,
+              aal: ctx.aal,
               cuerpo: {
                 kind: a.tipo,
                 title: a.titulo,
@@ -370,7 +378,92 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
         inputSchema: z.object({}),
         annotations: LECTURA,
       },
-      () => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', '/summary', { usuario: u }))),
+      () => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', '/summary', { usuario: u, aal: ctx.aal }))),
+    );
+  }
+
+  if (disponible('crear_cotizacion')) {
+    servidor.registerTool(
+      'crear_cotizacion',
+      {
+        title: 'Crear cotización en borrador (equipo Eytra)',
+        description: `Deja una cotización EN BORRADOR en el CMS para un cliente o prospecto; nunca se envía ni se aprueba desde aquí: el equipo revisa precios, la aprueba y la envía desde Cotizaciones. Los precios los pone el sistema (lista de precios o tienda sin IVA); las partidas libres que no están en la lista quedan en cero para que el equipo las cotice. Use producto con el slug de catalogo_de_productos, o descripcion para servicios (análisis, visitas, igualas). Si la empresa no existe, se crea como prospecto. Antes de crearla, confirme con el usuario el cliente, el contacto (correo o teléfono) y las partidas; después dé el folio y el enlace. Solo personal de Eytra con permiso de cotizar.${sesion}`,
+        inputSchema: z.object({
+          cliente: z
+            .object({
+              nombre: z.string().trim().min(1).max(120).describe('Nombre de la persona de contacto'),
+              cargo: z.string().trim().min(1).max(120).optional().describe('Cargo del contacto, p. ej. «Gerente de Mantenimiento»'),
+              empresa: z.string().trim().min(1).max(160).optional().describe('Nombre comercial o razón social del cliente'),
+              correo: z.email().max(254).optional(),
+              telefono: z.string().trim().max(40).optional().describe('10 dígitos'),
+              ciudad: z.string().trim().max(80).optional(),
+            })
+            .refine((c) => c.correo !== undefined || c.telefono !== undefined, 'Indique el correo o el teléfono del contacto.'),
+          partidas: z
+            .array(
+              z
+                .object({
+                  producto: z.string().trim().min(1).max(120).optional().describe('slug de catalogo_de_productos'),
+                  descripcion: z.string().trim().min(2).max(300).optional().describe('Texto libre para lo que no está en el catálogo'),
+                  cantidad: z.number().positive().max(100000),
+                  unidad: z.string().trim().min(1).max(30).optional().describe('Solo con descripcion; por omisión «Servicio»'),
+                  nota: z.string().trim().max(300).optional(),
+                })
+                .refine((l) => (l.producto === undefined) !== (l.descripcion === undefined), 'Cada partida lleva producto o descripcion, no ambos.'),
+            )
+            .min(1)
+            .max(50),
+          notas: z.string().trim().max(4000).optional().describe('Notas internas para el equipo (el cliente no las ve)'),
+          formato: z
+            .enum(['general', 'laboratorio', 'residual', 'quimicos', 'equipos', 'mantenimiento', 'servicio_filtros', 'proyecto', 'iguala'])
+            .optional()
+            .describe('Formato de la cotización; sin él, el sistema lo sugiere por las partidas'),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      (a) =>
+        comoPersona(async (u) =>
+          desdeApi(
+            await asistente.llamar('POST', '/quotes', {
+              usuario: u,
+              aal: ctx.aal,
+              cuerpo: {
+                client: {
+                  name: a.cliente.nombre,
+                  ...(a.cliente.cargo ? { title: a.cliente.cargo } : {}),
+                  ...(a.cliente.empresa ? { company: a.cliente.empresa } : {}),
+                  ...(a.cliente.correo ? { email: a.cliente.correo } : {}),
+                  ...(a.cliente.telefono ? { phone: a.cliente.telefono } : {}),
+                  ...(a.cliente.ciudad ? { city: a.cliente.ciudad } : {}),
+                },
+                lines: a.partidas.map((l) => ({
+                  ...(l.producto ? { slug: l.producto } : { description: l.descripcion }),
+                  quantity: l.cantidad,
+                  ...(l.descripcion && l.unidad ? { unit: l.unidad } : {}),
+                  ...(l.nota ? { note: l.nota } : {}),
+                })),
+                ...(a.notas ? { notes: a.notas } : {}),
+                ...(a.formato ? { template: a.formato } : {}),
+                // La API pide un identificador de origen (en correo, el Message-ID). Aquí no hay mensaje: uno nuevo
+                // por cotización, así que reintentar crea otra (el modelo debe confirmar antes de crearla).
+                source: { message_id: `mcp:${randomUUID()}`, subject: 'Cotización desde el asistente (MCP)' },
+              },
+            }),
+          ),
+        ),
+    );
+  }
+
+  if (disponible('estado_de_cotizacion')) {
+    servidor.registerTool(
+      'estado_de_cotizacion',
+      {
+        title: 'Estado de una cotización (equipo Eytra)',
+        description: `Estado, cliente, partidas y totales de una cotización por su folio (ET-2611642). Solo personal de Eytra con permiso en Cotizaciones.${sesion}`,
+        inputSchema: z.object({ folio: z.string().trim().min(1).max(40).regex(/^[A-Za-z0-9-]+$/).describe('Folio de la cotización, p. ej. ET-2611642') }),
+        annotations: LECTURA,
+      },
+      ({ folio }) => comoPersona(async (u) => desdeApi(await asistente.llamar('GET', `/quotes/${encodeURIComponent(folio)}`, { usuario: u, aal: ctx.aal }))),
     );
   }
 }

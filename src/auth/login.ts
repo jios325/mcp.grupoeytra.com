@@ -1,5 +1,6 @@
 import { createClient, type Session } from '@supabase/supabase-js';
 
+import type { Aal } from '../asistente.js';
 import type { Config } from '../config.js';
 
 // Inicio de sesión contra el Auth de Supabase del CMS: las mismas cuentas, contraseñas y apps de
@@ -7,7 +8,8 @@ import type { Config } from '../config.js';
 // sabe quién es la persona, cierra la sesión de Supabase (revoca su refresh token) y emite sus propios tokens.
 
 export type PasoLogin =
-  | { tipo: 'listo'; usuarioId: string }
+  /** aal2: la persona pasó su app de autenticación en este inicio de sesión. */
+  | { tipo: 'listo'; usuarioId: string; aal: Aal }
   | { tipo: 'segundo_factor'; sesion: Pick<Session, 'access_token' | 'refresh_token'>; factorId: string }
   | { tipo: 'error'; mensaje: string };
 
@@ -48,7 +50,7 @@ export class LoginSupabase {
     }
 
     await supabase.auth.signOut({ scope: 'local' });
-    return { tipo: 'listo', usuarioId: data.user.id };
+    return { tipo: 'listo', usuarioId: data.user.id, aal: nivel.currentLevel === 'aal2' ? 'aal2' : 'aal1' };
   }
 
   async conCodigo(sesion: Pick<Session, 'access_token' | 'refresh_token'>, factorId: string, codigo: string): Promise<PasoLogin> {
@@ -62,7 +64,7 @@ export class LoginSupabase {
     }
     const usuarioId = puesta.user.id;
     await supabase.auth.signOut({ scope: 'local' });
-    return { tipo: 'listo', usuarioId };
+    return { tipo: 'listo', usuarioId, aal: 'aal2' };
   }
 
   /** Cierra una sesión a medias (el usuario no terminó el segundo factor). */

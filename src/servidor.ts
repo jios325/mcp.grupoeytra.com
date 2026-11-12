@@ -3,7 +3,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
 import express, { type NextFunction, type Request, type Response } from 'express';
 
-import { ClienteAsistente, type Persona, type Resultado } from './asistente.js';
+import { ClienteAsistente, type Aal, type Persona, type Resultado } from './asistente.js';
 import { Almacen } from './auth/almacen.js';
 import { Limitador } from './auth/limitador.js';
 import { LoginSupabase } from './auth/login.js';
@@ -44,11 +44,13 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
 
   // /me de cada persona con sesión, un minuto en memoria (cada mensaje de MCP es una petición HTTP).
   const personas = new Map<string, { resultado: Resultado<Persona>; vence: number }>();
-  async function persona(usuarioId: string): Promise<Resultado<Persona>> {
-    const guardada = personas.get(usuarioId);
+  async function persona(usuarioId: string, aal: Aal): Promise<Resultado<Persona>> {
+    // Por persona y doble factor: Super Admin con aal1 recibe 403 y con aal2 entra.
+    const clave = `${usuarioId}:${aal}`;
+    const guardada = personas.get(clave);
     if (guardada && guardada.vence > Date.now()) return guardada.resultado;
-    const resultado = await asistente.persona(usuarioId);
-    if (resultado.ok || resultado.status === 403 || resultado.status === 404) personas.set(usuarioId, { resultado, vence: Date.now() + TTL_PERSONA_MS });
+    const resultado = await asistente.persona(usuarioId, aal);
+    if (resultado.ok || resultado.status === 403 || resultado.status === 404) personas.set(clave, { resultado, vence: Date.now() + TTL_PERSONA_MS });
     if (personas.size > 5_000) personas.clear();
     return resultado;
   }
@@ -56,7 +58,8 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
   const mcp = createMcpHandler(
     async (ctx) => {
       const usuarioId = typeof ctx.authInfo?.extra?.usuarioId === 'string' ? ctx.authInfo.extra.usuarioId : null;
-      return crearServidor({ sitio, cms, asistente, cupoVisitantes }, { usuarioId, persona: usuarioId ? await persona(usuarioId) : null });
+      const aal: Aal = ctx.authInfo?.extra?.aal === 'aal2' ? 'aal2' : 'aal1';
+      return crearServidor({ sitio, cms, asistente, cupoVisitantes }, { usuarioId, aal, persona: usuarioId ? await persona(usuarioId, aal) : null });
     },
     { onerror: (error) => console.error('[mcp]', error.message) },
   );
@@ -110,7 +113,7 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
         expiresAt: sujeto.vence,
         resource: new URL(config.recurso),
         resourceMetadataUrl: metadatosRecurso,
-        extra: { usuarioId: sujeto.usuarioId },
+        extra: { usuarioId: sujeto.usuarioId, aal: sujeto.aal },
       };
       (req as Request & { auth?: AuthInfo }).auth = auth;
       return next();

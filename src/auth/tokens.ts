@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose';
 
+import type { Aal } from '../asistente.js';
 import { aleatorio } from './almacen.js';
 
 // Access tokens del MCP: JWT HS256 firmados por este servidor, con la audiencia del recurso (RFC 8707).
@@ -11,6 +12,7 @@ export const DURACION_REFRESH_MS = 30 * 24 * 60 * 60_000;
 
 export interface Sujeto {
   usuarioId: string;
+  aal: Aal;
   clientId: string;
   scope: string;
   vence: number;
@@ -27,8 +29,8 @@ export class Tokens {
     this.llave = new TextEncoder().encode(secreto);
   }
 
-  async firmar(usuarioId: string, clientId: string, scope: string): Promise<string> {
-    return new SignJWT({ client_id: clientId, scope })
+  async firmar(usuarioId: string, aal: Aal, clientId: string, scope: string): Promise<string> {
+    return new SignJWT({ client_id: clientId, scope, aal })
       .setProtectedHeader({ alg: 'HS256', typ: 'at+jwt' })
       .setIssuer(this.emisor)
       .setAudience(this.audiencia)
@@ -49,7 +51,7 @@ export class Tokens {
         typ: 'at+jwt',
       });
       if (typeof payload.sub !== 'string' || typeof payload.client_id !== 'string' || typeof payload.exp !== 'number') return null;
-      return { usuarioId: payload.sub, clientId: payload.client_id, scope: typeof payload.scope === 'string' ? payload.scope : '', vence: payload.exp };
+      return { usuarioId: payload.sub, aal: payload.aal === 'aal2' ? 'aal2' : 'aal1', clientId: payload.client_id, scope: typeof payload.scope === 'string' ? payload.scope : '', vence: payload.exp };
     } catch {
       return null;
     }

@@ -3,6 +3,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import type { Aal } from '../asistente.js';
+
 // Estado del servidor de autorización en SQLite (node:sqlite, sin dependencias): clientes registrados
 // por DCR, códigos de autorización y refresh tokens. Los códigos y tokens se guardan como hash SHA-256:
 // una copia de la base no sirve para entrar.
@@ -17,6 +19,7 @@ export interface ClienteOAuth {
 export interface CodigoAutorizacion {
   client_id: string;
   usuario_id: string;
+  aal: Aal;
   redirect_uri: string;
   code_challenge: string;
   scope: string;
@@ -27,6 +30,7 @@ export interface RefreshToken {
   familia: string;
   client_id: string;
   usuario_id: string;
+  aal: Aal;
   scope: string;
   vence: number;
   usado: number | null;
@@ -73,6 +77,11 @@ export class Almacen {
       create index if not exists refresh_familia on refresh (familia);
       create index if not exists refresh_usuario on refresh (usuario_id);
     `);
+    // Bases creadas antes de guardar el doble factor: la columna se agrega con aal1 (nadie queda con más).
+    for (const tabla of ['codigos', 'refresh']) {
+      const columnas = this.db.prepare(`pragma table_info(${tabla})`).all() as { name: string }[];
+      if (!columnas.some((c) => c.name === 'aal')) this.db.exec(`alter table ${tabla} add column aal text not null default 'aal1'`);
+    }
   }
 
   registrarCliente(datos: { client_name: string; redirect_uris: string[] }): ClienteOAuth | null {
@@ -101,14 +110,14 @@ export class Almacen {
 
   guardarCodigo(codigo: string, datos: CodigoAutorizacion) {
     this.db
-      .prepare('insert into codigos (hash, client_id, usuario_id, redirect_uri, code_challenge, scope, vence) values (?, ?, ?, ?, ?, ?, ?)')
-      .run(hash(codigo), datos.client_id, datos.usuario_id, datos.redirect_uri, datos.code_challenge, datos.scope, datos.vence);
+      .prepare('insert into codigos (hash, client_id, usuario_id, aal, redirect_uri, code_challenge, scope, vence) values (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(hash(codigo), datos.client_id, datos.usuario_id, datos.aal, datos.redirect_uri, datos.code_challenge, datos.scope, datos.vence);
   }
 
   /** Un código sirve una sola vez: se borra al leerlo, sea válido o no. */
   canjearCodigo(codigo: string): CodigoAutorizacion | null {
     const h = hash(codigo);
-    const fila = this.db.prepare('delete from codigos where hash = ? returning client_id, usuario_id, redirect_uri, code_challenge, scope, vence').get(h) as
+    const fila = this.db.prepare('delete from codigos where hash = ? returning client_id, usuario_id, aal, redirect_uri, code_challenge, scope, vence').get(h) as
       | CodigoAutorizacion
       | undefined;
     if (!fila || fila.vence < Date.now()) return null;
@@ -118,15 +127,15 @@ export class Almacen {
   emitirRefresh(datos: Omit<RefreshToken, 'usado'>): string {
     const token = `eytra_rt_${aleatorio(32)}`;
     this.db
-      .prepare('insert into refresh (hash, familia, client_id, usuario_id, scope, vence) values (?, ?, ?, ?, ?, ?)')
-      .run(hash(token), datos.familia, datos.client_id, datos.usuario_id, datos.scope, datos.vence);
+      .prepare('insert into refresh (hash, familia, client_id, usuario_id, aal, scope, vence) values (?, ?, ?, ?, ?, ?, ?)')
+      .run(hash(token), datos.familia, datos.client_id, datos.usuario_id, datos.aal, datos.scope, datos.vence);
     this.db.prepare('update clientes set ultimo_uso = ? where client_id = ?').run(Date.now(), datos.client_id);
     return token;
   }
 
   /** Lee un refresh token vigente y sin usar, sin gastarlo. Uno ya usado revoca su familia. */
   verRefresh(token: string): RefreshToken | null {
-    const fila = this.db.prepare('select familia, client_id, usuario_id, scope, vence, usado from refresh where hash = ?').get(hash(token)) as RefreshToken | undefined;
+    const fila = this.db.prepare('select familia, client_id, usuario_id, aal, scope, vence, usado from refresh where hash = ?').get(hash(token)) as RefreshToken | undefined;
     if (!fila) return null;
     if (fila.usado !== null) {
       this.revocarFamilia(fila.familia);
@@ -141,7 +150,7 @@ export class Almacen {
    */
   usarRefresh(token: string): { ok: true; datos: RefreshToken } | { ok: false; motivo: 'no_existe' | 'vencido' | 'reusado' } {
     const h = hash(token);
-    const fila = this.db.prepare('select familia, client_id, usuario_id, scope, vence, usado from refresh where hash = ?').get(h) as RefreshToken | undefined;
+    const fila = this.db.prepare('select familia, client_id, usuario_id, aal, scope, vence, usado from refresh where hash = ?').get(h) as RefreshToken | undefined;
     if (!fila) return { ok: false, motivo: 'no_existe' };
     if (fila.usado !== null) {
       this.revocarFamilia(fila.familia);

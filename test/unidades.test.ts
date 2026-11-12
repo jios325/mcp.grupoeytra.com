@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 
-import { Almacen } from '../src/auth/almacen.js';
+import { Almacen, hash } from '../src/auth/almacen.js';
 import { redirectRegistrado, redirectValido, s256 } from '../src/auth/oauth.js';
 import { Tokens } from '../src/auth/tokens.js';
 import { esProtegida } from '../src/herramientas.js';
@@ -116,17 +120,18 @@ test('PKCE S256: SHA-256 en base64url sin relleno (comparado con WebCrypto)', as
 
 test('códigos de un solo uso y refresh con rotación y detección de reúso', () => {
   const almacen = new Almacen(':memory:');
-  almacen.guardarCodigo('codigo-1', { client_id: 'c', usuario_id: 'u', redirect_uri: 'https://x', code_challenge: 'h', scope: 'eytra', vence: Date.now() + 60_000 });
-  assert.equal(almacen.canjearCodigo('codigo-1')?.usuario_id, 'u');
+  almacen.guardarCodigo('codigo-1', { client_id: 'c', usuario_id: 'u', aal: 'aal2', redirect_uri: 'https://x', code_challenge: 'h', scope: 'eytra', vence: Date.now() + 60_000 });
+  const canjeado = almacen.canjearCodigo('codigo-1');
+  assert.deepEqual(canjeado && { u: canjeado.usuario_id, aal: canjeado.aal }, { u: 'u', aal: 'aal2' });
   assert.equal(almacen.canjearCodigo('codigo-1'), null);
 
-  almacen.guardarCodigo('viejo', { client_id: 'c', usuario_id: 'u', redirect_uri: 'https://x', code_challenge: 'h', scope: 'eytra', vence: Date.now() - 1 });
+  almacen.guardarCodigo('viejo', { client_id: 'c', usuario_id: 'u', aal: 'aal1', redirect_uri: 'https://x', code_challenge: 'h', scope: 'eytra', vence: Date.now() - 1 });
   assert.equal(almacen.canjearCodigo('viejo'), null);
 
-  const r1 = almacen.emitirRefresh({ familia: 'f', client_id: 'c', usuario_id: 'u', scope: 'eytra', vence: Date.now() + 60_000 });
+  const r1 = almacen.emitirRefresh({ familia: 'f', client_id: 'c', usuario_id: 'u', aal: 'aal2', scope: 'eytra', vence: Date.now() + 60_000 });
   const uso = almacen.usarRefresh(r1);
-  assert.equal(uso.ok, true);
-  const r2 = almacen.emitirRefresh({ familia: 'f', client_id: 'c', usuario_id: 'u', scope: 'eytra', vence: Date.now() + 60_000 });
+  assert.equal(uso.ok && uso.datos.aal, 'aal2');
+  const r2 = almacen.emitirRefresh({ familia: 'f', client_id: 'c', usuario_id: 'u', aal: 'aal2', scope: 'eytra', vence: Date.now() + 60_000 });
   // Reusar r1 revoca toda la familia, también r2.
   assert.deepEqual(almacen.usarRefresh(r1), { ok: false, motivo: 'reusado' });
   assert.deepEqual(almacen.usarRefresh(r2), { ok: false, motivo: 'no_existe' });
@@ -136,8 +141,10 @@ test('códigos de un solo uso y refresh con rotación y detección de reúso', (
 test('access tokens: solo los nuestros y para este recurso', async () => {
   const secreto = 'x'.repeat(40);
   const tokens = new Tokens(secreto, 'https://mcp.grupoeytra.com', 'https://mcp.grupoeytra.com/mcp');
-  const token = await tokens.firmar('usuario-1', 'cliente-1', 'eytra');
-  assert.deepEqual(await tokens.verificar(token).then((s) => s && { u: s.usuarioId, c: s.clientId }), { u: 'usuario-1', c: 'cliente-1' });
+  const token = await tokens.firmar('usuario-1', 'aal2', 'cliente-1', 'eytra');
+  assert.deepEqual(await tokens.verificar(token).then((s) => s && { u: s.usuarioId, aal: s.aal, c: s.clientId }), { u: 'usuario-1', aal: 'aal2', c: 'cliente-1' });
+  const sinFactor = await tokens.firmar('usuario-1', 'aal1', 'cliente-1', 'eytra');
+  assert.equal((await tokens.verificar(sinFactor))?.aal, 'aal1');
   const otroRecurso = new Tokens(secreto, 'https://mcp.grupoeytra.com', 'https://otro.example/mcp');
   assert.equal(await otroRecurso.verificar(token), null);
   const otroSecreto = new Tokens('y'.repeat(40), 'https://mcp.grupoeytra.com', 'https://mcp.grupoeytra.com/mcp');
@@ -147,7 +154,25 @@ test('access tokens: solo los nuestros y para este recurso', async () => {
 
 test('herramientas protegidas', () => {
   assert.equal(esProtegida('estado_de_cuenta'), true);
+  assert.equal(esProtegida('crear_cotizacion'), true);
   assert.equal(esProtegida('buscar_en_sitio'), false);
   assert.equal(esProtegida('toString'), false);
   assert.equal(esProtegida(undefined), false);
+});
+
+test('una base de antes del doble factor gana la columna aal con aal1', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-almacen-'));
+  const ruta = join(dir, 'vieja.sqlite');
+  const vieja = new DatabaseSync(ruta);
+  vieja.exec(`
+    create table refresh (hash text primary key, familia text not null, client_id text not null, usuario_id text not null, scope text not null, vence integer not null, usado integer);
+    create table codigos (hash text primary key, client_id text not null, usuario_id text not null, redirect_uri text not null, code_challenge text not null, scope text not null, vence integer not null);
+  `);
+  vieja.prepare('insert into refresh (hash, familia, client_id, usuario_id, scope, vence) values (?, ?, ?, ?, ?, ?)').run(hash('eytra_rt_viejo'), 'f', 'c', 'u', 'eytra', Date.now() + 60_000);
+  vieja.close();
+  const almacen = new Almacen(ruta);
+  const uso = almacen.usarRefresh('eytra_rt_viejo');
+  assert.equal(uso.ok && uso.datos.aal, 'aal1');
+  almacen.cerrar();
+  rmSync(dir, { recursive: true, force: true });
 });

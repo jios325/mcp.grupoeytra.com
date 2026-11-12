@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import express, { type Request, type Response, type Router } from 'express';
 
-import type { ClienteAsistente } from '../asistente.js';
+import type { Aal, ClienteAsistente } from '../asistente.js';
 import type { Config } from '../config.js';
 import { aleatorio, type Almacen, type ClienteOAuth } from './almacen.js';
 import type { LoginSupabase } from './login.js';
@@ -293,9 +293,9 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
     }
     if (resultado.tipo !== 'listo') return html(res, 400, paginaError('No se pudo iniciar sesión', 'Vuelva a conectar desde su aplicación.'));
 
-    // La persona existe en Auth; ahora la API dice si puede usar el asistente (activa, no comprador, sin
-    // doble factor obligatorio por rol) y con qué alcance. Su mensaje se muestra tal cual.
-    const persona = await asistente.persona(resultado.usuarioId);
+    // La persona existe en Auth; ahora la API dice si puede usar el asistente (activa, no comprador; con
+    // doble factor obligatorio por rol, solo Super Admin y solo con aal2) y con qué alcance. Su mensaje se muestra tal cual.
+    const persona = await asistente.persona(resultado.usuarioId, resultado.aal);
     transacciones.delete(id);
     if (!persona.ok) {
       console.warn('[oauth] inicio rechazado por la API', { status: persona.status, cliente: tx.clientId });
@@ -307,6 +307,7 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
     almacen.guardarCodigo(codigo, {
       client_id: tx.clientId,
       usuario_id: resultado.usuarioId,
+      aal: resultado.aal,
       redirect_uri: tx.redirectUri,
       code_challenge: tx.codeChallenge,
       scope: tx.scope,
@@ -328,6 +329,7 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
     if (!recursoValido(p.resource, config.recurso)) return errorToken(res, 400, 'invalid_target', 'El recurso no es este servidor.');
 
     let usuarioId: string;
+    let aal: Aal;
     let familia: string;
     if (p.grant_type === 'authorization_code') {
       const codigo = texto(p.code, 200);
@@ -337,6 +339,7 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
         return errorToken(res, 400, 'invalid_grant', 'El código no es válido, ya se usó o venció.');
       }
       usuarioId = datos.usuario_id;
+      aal = datos.aal;
       familia = aleatorio(16);
     } else if (p.grant_type === 'refresh_token') {
       const token = texto(p.refresh_token, 200);
@@ -345,7 +348,7 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
       if (!token || !visto || visto.client_id !== cliente.client_id) return sinSesion();
       // Cada renovación confirma con la API que la persona sigue activa y con acceso, antes de gastar el
       // refresh: solo 403/404 cierra la sesión; un 429 o una caída de la API deja el token para reintentar.
-      const persona = await asistente.persona(visto.usuario_id);
+      const persona = await asistente.persona(visto.usuario_id, visto.aal);
       if (!persona.ok) {
         if (persona.status === 403 || persona.status === 404) {
           almacen.revocarFamilia(visto.familia);
@@ -360,13 +363,15 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
         return sinSesion();
       }
       usuarioId = uso.datos.usuario_id;
+      // El doble factor se pasó al iniciar sesión y la familia lo conserva: renovar no lo pide de nuevo.
+      aal = uso.datos.aal;
       familia = uso.datos.familia;
     } else {
       return errorToken(res, 400, 'unsupported_grant_type', 'Solo authorization_code y refresh_token.');
     }
 
-    const accessToken = await tokens.firmar(usuarioId, cliente.client_id, SCOPE);
-    const refreshToken = almacen.emitirRefresh({ familia, client_id: cliente.client_id, usuario_id: usuarioId, scope: SCOPE, vence: Date.now() + DURACION_REFRESH_MS });
+    const accessToken = await tokens.firmar(usuarioId, aal, cliente.client_id, SCOPE);
+    const refreshToken = almacen.emitirRefresh({ familia, client_id: cliente.client_id, usuario_id: usuarioId, aal, scope: SCOPE, vence: Date.now() + DURACION_REFRESH_MS });
     res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' }).json({
       access_token: accessToken,
       token_type: 'Bearer',

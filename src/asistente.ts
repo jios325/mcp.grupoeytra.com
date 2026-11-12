@@ -6,6 +6,13 @@ import type { Config } from './config.js';
 // que aquí siempre va su id de Supabase, nunca un correo o teléfono que alguien escribió.
 // La API decide el resto: RLS, herramientas apagadas, límites por persona y bitácora (assistant_log).
 
+/**
+ * Doble factor de la sesión: aal2 si la persona pasó su app de autenticación al iniciar sesión en el MCP.
+ * Va en X-Eytra-AAL; la API solo lo toma en cuenta porque la llave del MCP está marcada como «verifica el
+ * doble factor» (así entra Super Admin, que lo tiene obligatorio).
+ */
+export type Aal = 'aal1' | 'aal2';
+
 export type Resultado<T = unknown> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
 export interface Persona {
@@ -23,7 +30,7 @@ export class ClienteAsistente {
   async llamar<T = unknown>(
     metodo: 'GET' | 'POST',
     ruta: string,
-    opciones: { usuario?: string; cuerpo?: unknown; consulta?: Record<string, string | undefined> } = {},
+    opciones: { usuario?: string; aal?: Aal; cuerpo?: unknown; consulta?: Record<string, string | undefined> } = {},
   ): Promise<Resultado<T>> {
     const url = new URL(`${this.config.asistenteUrl}${ruta}`);
     for (const [clave, valor] of Object.entries(opciones.consulta ?? {})) {
@@ -34,7 +41,10 @@ export class ClienteAsistente {
       // Sin canal propio en la API: «other» es el de las integraciones con sesión verificada.
       'X-Eytra-Channel': 'other',
     };
-    if (opciones.usuario) encabezados['X-Eytra-User'] = opciones.usuario;
+    if (opciones.usuario) {
+      encabezados['X-Eytra-User'] = opciones.usuario;
+      if (opciones.aal === 'aal2') encabezados['X-Eytra-AAL'] = 'aal2';
+    }
     let cuerpo: string | undefined;
     if (opciones.cuerpo !== undefined) {
       cuerpo = JSON.stringify(opciones.cuerpo);
@@ -67,7 +77,7 @@ export class ClienteAsistente {
   }
 
   /** Quién es la persona, su empresa y qué herramientas le tocan. 403/404 si no puede usar el asistente. */
-  persona(usuarioId: string) {
-    return this.llamar<Persona>('GET', '/me', { usuario: usuarioId });
+  persona(usuarioId: string, aal: Aal = 'aal1') {
+    return this.llamar<Persona>('GET', '/me', { usuario: usuarioId, aal });
   }
 }

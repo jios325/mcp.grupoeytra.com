@@ -15,8 +15,9 @@ Claude ──HTTPS──▶ mcp.grupoeytra.com/mcp ─┬─▶ grupoeytra.com (
 |---|---|---|
 | **Cualquiera, sin sesión** | `buscar_en_sitio`, `leer_pagina`, `datos_de_contacto`, `catalogo_de_productos`, `envios_devoluciones_y_pagos`, `articulos_del_blog`, `leer_articulo`, `documentos` y `leer_documento` (solo públicos) | llms.txt y páginas de grupoeytra.com, vistas `*_public` y `shop_catalog` del CMS, `/knowledge` de la API |
 | **Cliente** (Cliente admin, Cliente operador) | lo público + `mi_cuenta`, `estado_de_cuenta`, `archivos_de_factura`, `resultados_de_laboratorio`, `crear_solicitud` | API del asistente como esa persona: solo su empresa, y sus propiedades si está limitado a algunas (RLS) |
-| **Equipo Eytra** (Ventas, Laboratorio, Técnico de campo, Almacén) | lo público + `mi_cuenta`, `resumen_del_dia`; `documentos` incluye los internos | API del asistente como esa persona |
-| **Super Admin y Finanzas** | solo lo público: el login se rechaza | La API no deja entrar a roles con doble factor obligatorio por el asistente; el MCP aplica la misma regla |
+| **Equipo Eytra** (Ventas, Laboratorio, Técnico de campo, Almacén) | lo público + `mi_cuenta`, `resumen_del_dia`; `documentos` incluye los internos; con Editar en Cotizaciones (Ventas), `crear_cotizacion` (en borrador) y `estado_de_cotizacion` | API del asistente como esa persona |
+| **Super Admin** | lo del equipo, cotizaciones incluidas, **solo si inició sesión con su app de autenticación** (aal2) | La API lo deja entrar porque la llave «MCP» está marcada como «verifica el doble factor» (CMS › Asistente IA › Acceso a la API, la marca solo un Super Admin) y el MCP manda `X-Eytra-AAL: aal2`. Sin la marca o sin código, se rechaza como antes |
+| **Finanzas** | solo lo público: el login se rechaza | La API no deja entrar a roles con doble factor obligatorio por el asistente (salvo Super Admin, arriba) |
 | **Comprador de la tienda** | solo lo público: el login se rechaza | Igual que en la API |
 
 Las herramientas apagadas en **CMS › Asistente IA** desaparecen para todos. El permiso se decide en la base (`assistant_call` + RLS); el MCP solo filtra qué herramientas anuncia según lo que responde `/me`. Cada llamada queda en `assistant_log` con la llave «MCP».
@@ -29,7 +30,7 @@ La API del asistente confía en el encabezado `X-Eytra-User` porque la llave est
 2. Claude descubre el servidor de autorización (`/.well-known/oauth-protected-resource/mcp` → `/.well-known/oauth-authorization-server`), se registra (`/register`, RFC 7591) y abre `/authorize` con PKCE S256.
 3. La persona escribe el correo y la contraseña del portal o del CMS; si tiene app de autenticación, el código de 6 dígitos. El MCP lo comprueba contra Supabase Auth, cierra esa sesión de Supabase de inmediato y pregunta a la API (`/me`) si la persona puede usar el asistente.
 4. El MCP emite su propio access token (JWT de 1 hora con audiencia `…/mcp`) y un refresh token de 30 días que rota en cada uso; si alguien reusa uno viejo, se revoca toda la sesión. Cada renovación vuelve a consultar `/me`: desactivar a la persona en el CMS la deja fuera.
-5. En cada llamada privada el MCP manda a la API el **id de Supabase** de la persona, nunca un dato que alguien escribió.
+5. En cada llamada privada el MCP manda a la API el **id de Supabase** de la persona, nunca un dato que alguien escribió, y `X-Eytra-AAL: aal2` si pasó su app de autenticación al iniciar sesión. Ese nivel queda en el access token y en la familia del refresh token: renovar no lo sube ni lo pide de nuevo.
 
 Protecciones adicionales (revisión de seguridad del 26 oct 2026):
 

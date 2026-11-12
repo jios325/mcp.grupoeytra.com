@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test';
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
-import { ClienteAsistente, type Persona, type Resultado } from '../src/asistente.js';
+import { ClienteAsistente, type Aal, type Persona, type Resultado } from '../src/asistente.js';
 import { Almacen } from '../src/auth/almacen.js';
 import { LoginSupabase, type PasoLogin } from '../src/auth/login.js';
 import { s256 } from '../src/auth/oauth.js';
@@ -33,13 +33,25 @@ const PERSONAS: Record<string, Resultado<Persona>> = {
   'u-finanzas': { ok: false, status: 403, error: 'Las cuentas con doble factor obligatorio no usan el asistente.' },
 };
 
+// Super Admin: como la API con la llave del MCP marcada, entra solo con aal2.
+const SUPER_ADMIN: Resultado<Persona> = {
+  ok: true,
+  data: { user: { id: 'u-root', name: 'Root', email: 'root@x.test', scope: 'staff', role: 'super_admin' }, company: null, tools: ['daily_summary', 'create_quote', 'quote_status'] },
+};
+
 class AsistenteFalso extends ClienteAsistente {
-  llamadas: { metodo: string; ruta: string; usuario?: string; cuerpo?: unknown }[] = [];
+  llamadas: { metodo: string; ruta: string; usuario?: string; aal?: Aal; cuerpo?: unknown }[] = [];
   constructor() {
     super({ asistenteUrl: 'http://cms.invalid', asistenteLlave: 'x' });
   }
-  override async llamar<T>(metodo: 'GET' | 'POST', ruta: string, op: { usuario?: string; cuerpo?: unknown } = {}): Promise<Resultado<T>> {
-    this.llamadas.push({ metodo, ruta, usuario: op.usuario, cuerpo: op.cuerpo });
+  override async llamar<T>(metodo: 'GET' | 'POST', ruta: string, op: { usuario?: string; aal?: Aal; cuerpo?: unknown } = {}): Promise<Resultado<T>> {
+    this.llamadas.push({ metodo, ruta, usuario: op.usuario, aal: op.aal, cuerpo: op.cuerpo });
+    if (op.usuario === 'u-root') {
+      if (op.aal !== 'aal2') return { ok: false, status: 403, error: 'Las cuentas con doble factor obligatorio no usan el asistente.' };
+      if (ruta === '/me') return SUPER_ADMIN as Resultado<T>;
+      if (ruta === '/quotes') return { ok: true, data: { folio: 'ET-1', status: 'draft' } as T };
+      if (ruta === '/quotes/ET-1') return { ok: true, data: { folio: 'ET-1', status: 'draft' } as T };
+    }
     if (ruta === '/me') return (PERSONAS[op.usuario ?? ''] ?? { ok: false, status: 404, error: 'Usuario no registrado en el CMS.' }) as Resultado<T>;
     if (ruta === '/catalog') return { ok: true, data: { products: [{ slug: 'cloro', price: 100 }] } as T };
     if (ruta === '/account') return { ok: true, data: { company: 'Condominio Brisa', total_due: 1740 } as T };
@@ -56,11 +68,13 @@ class LoginFalso extends LoginSupabase {
   override async conContrasena(correo: string, contrasena: string): Promise<PasoLogin> {
     if (contrasena !== 'bien') return { tipo: 'error', mensaje: 'Correo o contraseña incorrectos.' };
     if (correo === 'equipo@x.test') return { tipo: 'segundo_factor', sesion: { access_token: 'a', refresh_token: 'r' }, factorId: 'f' };
-    const ids: Record<string, string> = { 'cliente@x.test': 'u-cliente', 'finanzas@x.test': 'u-finanzas' };
-    return ids[correo] ? { tipo: 'listo', usuarioId: ids[correo]! } : { tipo: 'error', mensaje: 'Correo o contraseña incorrectos.' };
+    if (correo === 'root@x.test') return { tipo: 'segundo_factor', sesion: { access_token: 'a-root', refresh_token: 'r' }, factorId: 'f' };
+    // Super Admin sin app de autenticación dada de alta: entra solo con contraseña (aal1).
+    const ids: Record<string, string> = { 'cliente@x.test': 'u-cliente', 'finanzas@x.test': 'u-finanzas', 'rootsin@x.test': 'u-root' };
+    return ids[correo] ? { tipo: 'listo', usuarioId: ids[correo]!, aal: 'aal1' } : { tipo: 'error', mensaje: 'Correo o contraseña incorrectos.' };
   }
-  override async conCodigo(_s: unknown, _f: string, codigo: string): Promise<PasoLogin> {
-    return codigo === '123456' ? { tipo: 'listo', usuarioId: 'u-equipo' } : { tipo: 'error', mensaje: 'El código no es válido.' };
+  override async conCodigo(s: { access_token: string }, _f: string, codigo: string): Promise<PasoLogin> {
+    return codigo === '123456' ? { tipo: 'listo', usuarioId: s.access_token === 'a-root' ? 'u-root' : 'u-equipo', aal: 'aal2' } : { tipo: 'error', mensaje: 'El código no es válido.' };
   }
   override async descartar() {}
 }
@@ -268,7 +282,7 @@ describe('sin sesión', () => {
     const sinArticulo = await c.callTool({ name: 'leer_articulo', arguments: { slug: 'no-existe' } });
     assert.equal(sinArticulo.isError, true);
     await c.callTool({ name: 'documentos', arguments: {} });
-    assert.deepEqual(asistente.llamadas.at(-1), { metodo: 'GET', ruta: '/knowledge', usuario: undefined, cuerpo: undefined });
+    assert.deepEqual(asistente.llamadas.at(-1), { metodo: 'GET', ruta: '/knowledge', usuario: undefined, aal: 'aal1', cuerpo: undefined });
     await c.close();
 
     const r = await fetch(`${base}/mcp`, {
@@ -300,7 +314,7 @@ describe('con sesión', () => {
     assert.ok(nombres.includes('crear_solicitud'));
     assert.ok(!nombres.includes('resumen_del_dia'));
     assert.match(textoDe(await c.callTool({ name: 'estado_de_cuenta', arguments: {} })), /1740/);
-    assert.deepEqual(asistente.llamadas.at(-1), { metodo: 'GET', ruta: '/account', usuario: 'u-cliente', cuerpo: undefined });
+    assert.deepEqual(asistente.llamadas.at(-1), { metodo: 'GET', ruta: '/account', usuario: 'u-cliente', aal: 'aal1', cuerpo: undefined });
     await c.callTool({ name: 'crear_solicitud', arguments: { tipo: 'maintenance', titulo: 'Bomba', descripcion: 'Hace ruido' } });
     assert.deepEqual(asistente.llamadas.at(-1)?.cuerpo, { kind: 'maintenance', title: 'Bomba', description: 'Hace ruido' });
     await c.close();
@@ -322,6 +336,47 @@ describe('con sesión', () => {
     const r = await autorizar(clientId, 'equipo@x.test', { codigo2fa: '000000', verificador: randomBytes(32).toString('base64url') });
     assert.equal(r.status, 401);
     assert.match(await r.text(), /no es válido/);
+  });
+
+  test('Super Admin con su app de autenticación: cotiza y la API recibe aal2, también tras renovar', async () => {
+    const t = await tokenPara('root@x.test', '123456');
+    const c = await cliente(t.access_token);
+    const nombres = (await c.listTools()).tools.map((x) => x.name);
+    for (const n of ['crear_cotizacion', 'estado_de_cotizacion', 'resumen_del_dia']) assert.ok(nombres.includes(n), n);
+    assert.ok(!nombres.includes('estado_de_cuenta'));
+    const r = await c.callTool({
+      name: 'crear_cotizacion',
+      arguments: {
+        cliente: { nombre: 'Carla Pérez', empresa: 'Hotel Nuevo', correo: 'carla@hotelnuevo.test', ciudad: 'Tulum' },
+        partidas: [{ producto: 'cloro', cantidad: 2 }, { descripcion: 'Análisis fisicoquímico NOM-127', cantidad: 1, unidad: 'Mtra.' }],
+        notas: 'Entrega antes del viernes.',
+      },
+    });
+    assert.match(textoDe(r), /ET-1/);
+    const llamada = asistente.llamadas.at(-1)!;
+    assert.deepEqual({ ruta: llamada.ruta, usuario: llamada.usuario, aal: llamada.aal }, { ruta: '/quotes', usuario: 'u-root', aal: 'aal2' });
+    const cuerpo = llamada.cuerpo as { client: unknown; lines: unknown; notes: string; source: { message_id: string } };
+    assert.deepEqual(cuerpo.client, { name: 'Carla Pérez', company: 'Hotel Nuevo', email: 'carla@hotelnuevo.test', city: 'Tulum' });
+    assert.deepEqual(cuerpo.lines, [{ slug: 'cloro', quantity: 2 }, { description: 'Análisis fisicoquímico NOM-127', quantity: 1, unit: 'Mtra.' }]);
+    assert.match(cuerpo.source.message_id, /^mcp:[0-9a-f-]{36}$/);
+    assert.match(textoDe(await c.callTool({ name: 'estado_de_cotizacion', arguments: { folio: 'ET-1' } })), /draft/);
+    const sinContacto = await c.callTool({ name: 'crear_cotizacion', arguments: { cliente: { nombre: 'X' }, partidas: [{ descripcion: 'Visita', cantidad: 1 }] } });
+    assert.equal(sinContacto.isError, true);
+    await c.close();
+
+    // Renovar conserva el doble factor del inicio de sesión.
+    const r1 = await fetch(`${base}/token`, form({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: t.clientId }));
+    assert.equal(r1.status, 200);
+    const c2 = await cliente(((await r1.json()) as { access_token: string }).access_token);
+    assert.ok((await c2.listTools()).tools.some((x) => x.name === 'crear_cotizacion'));
+    await c2.close();
+  });
+
+  test('Super Admin sin segundo factor no recibe código: la API lo rechaza', async () => {
+    const clientId = await registrar();
+    const r = await autorizar(clientId, 'rootsin@x.test', { verificador: randomBytes(32).toString('base64url') });
+    assert.equal(r.status, 403);
+    assert.match(await r.text(), /doble factor obligatorio/);
   });
 
   test('Finanzas (doble factor obligatorio) no recibe código: la API lo rechaza', async () => {
