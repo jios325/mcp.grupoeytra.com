@@ -9,6 +9,9 @@ services:
     environment:
       HOST: 0.0.0.0
       MCP_DB_PATH: /app/data/mcp.sqlite
+      # El contenedor solo recibe tráfico de Apache, que pone la IP real al final de X-Forwarded-For.
+      # Si .env no lo define, se usa ese encabezado: sin él todos los clientes comparten los límites por IP.
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-forwarded-for}
     ports:
       - "127.0.0.1:8330:8330"
     volumes:

@@ -1,7 +1,8 @@
-import { leerConfig } from './config.js';
+import { avisosDeConfig, leerConfig } from './config.js';
 import { crearApp } from './servidor.js';
 
 const config = leerConfig();
+for (const aviso of avisosDeConfig(config)) console.warn(`[mcp] AVISO: ${aviso}`);
 const { app, almacen } = crearApp(config);
 
 const servidor = app.listen(config.puerto, config.host, () => {

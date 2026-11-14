@@ -38,6 +38,17 @@ export interface Config {
   hostsRedirect: string[];
 }
 
+/**
+ * Lo que conviene revisar antes de atender tráfico. Hoy una sola cosa: escuchar fuera de la propia
+ * máquina (HOST=0.0.0.0, el contenedor detrás de Apache) sin CLIENT_IP_HEADER hace que todas las
+ * peticiones parezcan venir del proxy, y cada límite por IP se vuelve un cupo compartido por todos.
+ */
+export function avisosDeConfig(config: Pick<Config, 'host' | 'encabezadoIp'>): string[] {
+  const local = ['127.0.0.1', '::1', 'localhost'].includes(config.host);
+  if (local || config.encabezadoIp) return [];
+  return ['CLIENT_IP_HEADER está vacío y HOST no es local: detrás de un proxy todos los clientes comparten los límites por IP. Ponga CLIENT_IP_HEADER=x-forwarded-for.'];
+}
+
 export function leerConfig(): Config {
   const urlPublica = sinBarraFinal(requerida('MCP_PUBLIC_URL'));
   const secretoTokens = requerida('MCP_TOKEN_SECRET');

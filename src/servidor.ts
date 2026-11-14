@@ -39,8 +39,21 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
   // MCP tiene 600 por hora en la API para todos; así quedan al menos 450 para quienes tienen sesión).
   const limiteVisitante = new Limitador(120, 15 * 60_000);
   const cupoVisitantes = new Limitador(150, 60 * 60_000);
+  // Documentos sin sesión: son las únicas herramientas públicas que gastan ese cupo global, así que
+  // llevan además un tope por IP; sin él, una sola dirección dejaba sin documentos a los demás visitantes.
+  const limiteDocumentos = new Limitador(30, 60 * 60_000);
+  const CON_CUPO = new Set(['documentos', 'leer_documento']);
+  // Con sesión: la API cobra cada llamada a la llave (600 por hora para todos) antes que a la persona
+  // (120 por hora), de modo que sin este tope una sola cuenta gastaría el cupo de todas.
+  const limitePersona = new Limitador(120, 60 * 60_000);
 
-  setInterval(() => almacen.limpiar(), 60 * 60_000).unref();
+  setInterval(() => {
+    try {
+      almacen.limpiar();
+    } catch (error) {
+      console.error('[mcp] limpieza', error instanceof Error ? error.message : error);
+    }
+  }, 60 * 60_000).unref();
 
   // /me de cada persona con sesión, un minuto en memoria (cada mensaje de MCP es una petición HTTP).
   const personas = new Map<string, { resultado: Resultado<Persona>; vence: number }>();
@@ -61,7 +74,9 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
       const aal: Aal = ctx.authInfo?.extra?.aal === 'aal2' ? 'aal2' : 'aal1';
       return crearServidor({ sitio, cms, asistente, cupoVisitantes }, { usuarioId, aal, persona: usuarioId ? await persona(usuarioId, aal) : null });
     },
-    { onerror: (error) => console.error('[mcp]', error.message) },
+    // El servidor no emite avisos (herramientas.ts declara listChanged: false), así que una escucha
+    // (subscriptions/listen) se cierra al abrirse; el tope bajo es por si eso cambiara.
+    { onerror: (error) => console.error('[mcp]', error.message), maxSubscriptions: 16 },
   );
   const mcpNodo = toNodeHandler(mcp, { onerror: (error) => console.error('[mcp] adaptador', error.message) });
 
@@ -100,12 +115,29 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
   // Autenticación perezosa: lo público pasa sin token; una llamada a herramienta privada sin token
   // recibe 401 con WWW-Authenticate (así Claude muestra «Conectar»). Un token presente pero inválido o
   // vencido siempre da 401, para que el cliente lo renueve.
+  type Llamada = { method: 'tools/call'; params?: { name?: unknown } | null };
+  const esLlamada = (m: unknown): m is Llamada => typeof m === 'object' && m !== null && (m as { method?: unknown }).method === 'tools/call';
+  const demasiadas = (res: Response, segundos: number, mensaje: string) => {
+    res.status(429).set('Retry-After', String(segundos)).json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: mensaje } });
+  };
+
   async function puerta(req: Request, res: Response, next: NextFunction) {
+    // Lo que aquí se revisa tiene que ser lo que el SDK va a ejecutar: si Express no analizó el cuerpo,
+    // el adaptador leería la petición por su cuenta y estos topes no verían ninguna llamada.
+    if (req.method === 'POST' && req.body === undefined) {
+      res.status(415).json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'El cuerpo debe ser JSON (Content-Type: application/json).' } });
+      return;
+    }
+    const mensajes: unknown[] = Array.isArray(req.body) ? req.body : [req.body];
+    const llamadas = mensajes.filter(esLlamada);
     const encabezado = req.headers.authorization;
     if (encabezado) {
       const coincide = /^Bearer\s+(\S+)\s*$/i.exec(encabezado);
       const sujeto = coincide ? await tokens.verificar(coincide[1]!) : null;
       if (!sujeto) return desafio(res, 'invalid_token', 'El acceso venció o no es válido.');
+      for (let i = 0; i < llamadas.length; i++) {
+        if (!limitePersona.tomar(sujeto.usuarioId)) return demasiadas(res, 3600, 'Demasiadas consultas con su cuenta en esta hora. Intente más tarde.');
+      }
       const auth: AuthInfo = {
         token: coincide![1]!,
         clientId: sujeto.clientId,
@@ -118,14 +150,12 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
       (req as Request & { auth?: AuthInfo }).auth = auth;
       return next();
     }
-    const mensajes = Array.isArray(req.body) ? req.body : [req.body];
-    const pidePrivada = mensajes.some((m) => m && typeof m === 'object' && m.method === 'tools/call' && esProtegida(m.params?.name));
-    if (pidePrivada) return desafio(res);
-    const llamadas = mensajes.filter((m) => m && typeof m === 'object' && m.method === 'tools/call').length;
-    for (let i = 0; i < llamadas; i++) {
-      if (!limiteVisitante.tomar(ipDe(req, config))) {
-        res.status(429).set('Retry-After', '900').json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Demasiadas consultas. Espere unos minutos o inicie sesión.' } });
-        return;
+    if (llamadas.some((m) => esProtegida(m.params?.name))) return desafio(res);
+    const ip = ipDe(req, config);
+    for (const m of llamadas) {
+      if (!limiteVisitante.tomar(ip)) return demasiadas(res, 900, 'Demasiadas consultas. Espere unos minutos o inicie sesión.');
+      if (typeof m.params?.name === 'string' && CON_CUPO.has(m.params.name) && !limiteDocumentos.tomar(ip)) {
+        return demasiadas(res, 3600, 'Demasiadas consultas de documentos desde esta dirección. Espere una hora o inicie sesión.');
       }
     }
     next();

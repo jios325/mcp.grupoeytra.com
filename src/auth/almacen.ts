@@ -165,6 +165,17 @@ export class Almacen {
     return { ok: true, datos: fila };
   }
 
+  /**
+   * Gasta un refresh token y emite el siguiente de su familia en un solo paso, sin esperas en medio:
+   * entre gastar y emitir no cabe un reúso ni una revocación que deje un token vivo en una familia borrada.
+   */
+  rotarRefresh(token: string, vence: number): { ok: true; token: string } | { ok: false; motivo: 'no_existe' | 'vencido' | 'reusado' } {
+    const uso = this.usarRefresh(token);
+    if (!uso.ok) return uso;
+    const { familia, client_id, usuario_id, aal, scope } = uso.datos;
+    return { ok: true, token: this.emitirRefresh({ familia, client_id, usuario_id, aal, scope, vence }) };
+  }
+
   revocarFamilia(familia: string) {
     this.db.prepare('delete from refresh where familia = ?').run(familia);
   }
@@ -174,11 +185,15 @@ export class Almacen {
     if (fila) this.revocarFamilia(fila.familia);
   }
 
-  /** Limpieza periódica: códigos y tokens vencidos, y clientes que no se usaron en 24 horas. */
+  /**
+   * Limpieza periódica: códigos y tokens vencidos, y clientes que no se usaron en 24 horas. Los refresh
+   * ya usados se quedan hasta vencer: su fila es lo único que delata el reúso de un token robado, y si
+   * se borrara antes, quien lo copió conservaría la sesión sin que nadie lo note.
+   */
   limpiar() {
     const ahora = Date.now();
     this.db.prepare('delete from codigos where vence < ?').run(ahora);
-    this.db.prepare('delete from refresh where vence < ? or (usado is not null and usado < ?)').run(ahora, ahora - 60 * 60_000);
+    this.db.prepare('delete from refresh where vence < ?').run(ahora);
     this.db.prepare('delete from clientes where ultimo_uso is null and creado < ?').run(ahora - 24 * 60 * 60_000);
   }
 

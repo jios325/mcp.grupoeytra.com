@@ -1,231 +1,30 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
 import { after, before, describe, test } from 'node:test';
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
-import { ClienteAsistente, type Aal, type Persona, type Resultado } from '../src/asistente.js';
-import { Almacen } from '../src/auth/almacen.js';
-import { LoginSupabase, type PasoLogin } from '../src/auth/login.js';
-import { s256 } from '../src/auth/oauth.js';
-import type { Config } from '../src/config.js';
-import { CmsPublico } from '../src/publico/cms.js';
-import { Sitio } from '../src/publico/sitio.js';
-import { crearApp } from '../src/servidor.js';
+import * as apoyo from './apoyo.js';
+import { form, REDIRECT, type AppDePrueba, type AsistenteFalso, type CmsFalso } from './apoyo.js';
 
-// Flujo completo contra la app real con el CMS y Supabase falsos: descubrimiento OAuth, registro,
-// login (con y sin segundo factor), token, lazy auth, alcance por rol y rotación del refresh token.
+// Flujo completo contra la app real con el CMS y Supabase falsos (test/apoyo.ts): descubrimiento OAuth,
+// registro, login (con y sin segundo factor), token, lazy auth, alcance por rol y rotación del refresh token.
 
-const PERSONAS: Record<string, Resultado<Persona>> = {
-  'u-cliente': {
-    ok: true,
-    data: {
-      user: { id: 'u-cliente', name: 'Admin Brisa', email: 'cliente@x.test', scope: 'client', role: 'client_admin' },
-      company: { id: 'c1', name: 'Condominio Brisa' },
-      tools: ['account_statement', 'invoice_files', 'lab_results', 'create_request', 'catalog_quote'],
-    },
-  },
-  'u-equipo': {
-    ok: true,
-    data: { user: { id: 'u-equipo', name: 'Lab', email: 'equipo@x.test', scope: 'staff', role: 'lab' }, company: null, tools: ['daily_summary'] },
-  },
-  'u-finanzas': { ok: false, status: 403, error: 'Las cuentas con doble factor obligatorio no usan el asistente.' },
-};
-
-// Super Admin: como la API con la llave del MCP marcada, entra solo con aal2.
-const SUPER_ADMIN: Resultado<Persona> = {
-  ok: true,
-  data: { user: { id: 'u-root', name: 'Root', email: 'root@x.test', scope: 'staff', role: 'super_admin' }, company: null, tools: ['daily_summary', 'create_quote', 'quote_status'] },
-};
-
-class AsistenteFalso extends ClienteAsistente {
-  llamadas: { metodo: string; ruta: string; usuario?: string; aal?: Aal; cuerpo?: unknown }[] = [];
-  constructor() {
-    super({ asistenteUrl: 'http://cms.invalid', asistenteLlave: 'x' });
-  }
-  override async llamar<T>(metodo: 'GET' | 'POST', ruta: string, op: { usuario?: string; aal?: Aal; cuerpo?: unknown } = {}): Promise<Resultado<T>> {
-    this.llamadas.push({ metodo, ruta, usuario: op.usuario, aal: op.aal, cuerpo: op.cuerpo });
-    if (op.usuario === 'u-root') {
-      if (op.aal !== 'aal2') return { ok: false, status: 403, error: 'Las cuentas con doble factor obligatorio no usan el asistente.' };
-      if (ruta === '/me') return SUPER_ADMIN as Resultado<T>;
-      if (ruta === '/quotes') return { ok: true, data: { folio: 'ET-1', status: 'draft' } as T };
-      if (ruta === '/quotes/ET-1') return { ok: true, data: { folio: 'ET-1', status: 'draft' } as T };
-    }
-    if (ruta === '/me') return (PERSONAS[op.usuario ?? ''] ?? { ok: false, status: 404, error: 'Usuario no registrado en el CMS.' }) as Resultado<T>;
-    if (ruta === '/catalog') return { ok: true, data: { products: [{ slug: 'cloro', price: 100 }] } as T };
-    if (ruta === '/account') return { ok: true, data: { company: 'Condominio Brisa', total_due: 1740 } as T };
-    if (ruta === '/summary') return { ok: true, data: { billed: 1 } as T };
-    if (ruta === '/requests') return { ok: true, data: { folio: 'SOL-1' } as T };
-    return { ok: false, status: 404, error: 'no' };
-  }
-}
-
-class LoginFalso extends LoginSupabase {
-  constructor() {
-    super({ supabaseUrl: 'http://supabase.invalid', supabaseLlavePublicable: 'x' });
-  }
-  override async conContrasena(correo: string, contrasena: string): Promise<PasoLogin> {
-    if (contrasena !== 'bien') return { tipo: 'error', mensaje: 'Correo o contraseña incorrectos.' };
-    if (correo === 'equipo@x.test') return { tipo: 'segundo_factor', sesion: { access_token: 'a', refresh_token: 'r' }, factorId: 'f' };
-    if (correo === 'root@x.test') return { tipo: 'segundo_factor', sesion: { access_token: 'a-root', refresh_token: 'r' }, factorId: 'f' };
-    // Super Admin sin app de autenticación dada de alta: entra solo con contraseña (aal1).
-    const ids: Record<string, string> = { 'cliente@x.test': 'u-cliente', 'finanzas@x.test': 'u-finanzas', 'rootsin@x.test': 'u-root' };
-    return ids[correo] ? { tipo: 'listo', usuarioId: ids[correo]!, aal: 'aal1' } : { tipo: 'error', mensaje: 'Correo o contraseña incorrectos.' };
-  }
-  override async conCodigo(s: { access_token: string }, _f: string, codigo: string): Promise<PasoLogin> {
-    return codigo === '123456' ? { tipo: 'listo', usuarioId: s.access_token === 'a-root' ? 'u-root' : 'u-equipo', aal: 'aal2' } : { tipo: 'error', mensaje: 'El código no es válido.' };
-  }
-  override async descartar() {}
-}
-
-class CmsFalso extends CmsPublico {
-  pedidos: Parameters<CmsPublico['catalogo']>[0][] = [];
-  override async catalogo(opciones: Parameters<CmsPublico['catalogo']>[0] = {}) {
-    this.pedidos.push(opciones);
-    const productos = [{ slug: 'cloro', name: 'Cloro', category: 'quimicos', price: 100, sale_mode: 'shipping', recurring_interval: null, pack_quantity: 1, pack_unit: 'L', summary: null }];
-    return { nota: 'Precios de lista', orden: opciones.orden ?? 'destacados', total: 1, hay_mas: false, productos, tienda: 'https://grupoeytra.com/tienda' } as Awaited<ReturnType<CmsPublico['catalogo']>>;
-  }
-  // Como en producción hoy: el blog no está en el CMS.
-  override async articulos() {
-    return [];
-  }
-  override async articulo() {
-    return null;
-  }
-  override async temasBlog() {
-    return [];
-  }
-}
-
-const cmsFalso = new CmsFalso({ supabaseUrl: 'http://supabase.invalid', supabaseLlavePublicable: 'x' });
-
-class SitioFalso extends Sitio {
-  override async indiceSitio() {
-    return {
-      resumen: '# Grupo Eytra',
-      entradas: [
-        { titulo: 'Laboratorio', url: 'https://grupoeytra.com/laboratorio', descripcion: 'análisis', seccion: 'Lab' },
-        { titulo: 'Agua de calderas', url: 'https://grupoeytra.com/blog/agua-calderas', descripcion: 'tratamiento interno', seccion: 'Guías técnicas del blog' },
-      ],
-    };
-  }
-  override async leerPagina(rutaOUrl: string) {
-    if (rutaOUrl !== '/blog/agua-calderas') return { ok: false as const, error: 'La página no existe en el sitio.' };
-    return { ok: true as const, url: 'https://grupoeytra.com/blog/agua-calderas', titulo: 'Agua de calderas', descripcion: '', texto: '# Agua de calderas', largo_total: 18 };
-  }
-}
-
+let app: AppDePrueba;
 let base = '';
-let cerrar: () => void;
-const asistente = new AsistenteFalso();
+let asistente: AsistenteFalso;
+let cmsFalso: CmsFalso;
 
 before(async () => {
-  const config: Config = {
-    urlPublica: 'http://127.0.0.1:0',
-    recurso: '',
-    puerto: 0,
-    host: '127.0.0.1',
-    hostsPermitidos: ['127.0.0.1', 'localhost'],
-    sitio: 'https://grupoeytra.com',
-    supabaseUrl: 'http://supabase.invalid',
-    supabaseLlavePublicable: 'x',
-    asistenteUrl: 'http://cms.invalid',
-    asistenteLlave: 'x',
-    secretoTokens: randomBytes(32).toString('hex'),
-    rutaBase: ':memory:',
-    encabezadoIp: null,
-    hostsRedirect: ['claude.ai', 'claude.com'],
-  };
-  // El puerto se conoce al escuchar: se reserva uno y la app se crea con su URL definitiva.
-  const { createServer } = await import('node:net');
-  const puerto = await new Promise<number>((ok) => {
-    const s = createServer().listen(0, '127.0.0.1', () => {
-      const p = (s.address() as AddressInfo).port;
-      s.close(() => ok(p));
-    });
-  });
-  config.urlPublica = `http://127.0.0.1:${puerto}`;
-  config.recurso = `${config.urlPublica}/mcp`;
-  config.puerto = puerto;
-  const { app } = crearApp(config, {
-    almacen: new Almacen(':memory:'),
-    asistente,
-    login: new LoginFalso(),
-    sitio: new SitioFalso('https://grupoeytra.com'),
-    cms: cmsFalso,
-  });
-  const servidor = app.listen(puerto, '127.0.0.1');
-  await new Promise((ok) => servidor.once('listening', ok));
-  base = config.urlPublica;
-  cerrar = () => servidor.close();
+  app = await apoyo.levantar();
+  ({ base, asistente, cms: cmsFalso } = app);
 });
 
-after(() => cerrar());
+after(() => app.cerrar());
 
-const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
-
-async function registrar() {
-  const r = await fetch(`${base}/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' }),
-  });
-  assert.equal(r.status, 201);
-  return ((await r.json()) as { client_id: string }).client_id;
-}
-
-const form = (datos: Record<string, string>) => ({
-  method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: new URLSearchParams(datos).toString(),
-  redirect: 'manual' as const,
-});
-
-/** Recorre /authorize con el correo dado y devuelve la respuesta final (302 con código, o una página). */
-async function autorizar(clientId: string, correo: string, opciones: { codigo2fa?: string; verificador: string }) {
-  const q = new URLSearchParams({
-    response_type: 'code',
-    client_id: clientId,
-    redirect_uri: REDIRECT,
-    code_challenge: s256(opciones.verificador),
-    code_challenge_method: 'S256',
-    state: 'estado-1',
-    scope: 'eytra',
-    resource: `${base}/mcp`,
-  });
-  const pagina = await fetch(`${base}/authorize?${q}`);
-  assert.equal(pagina.status, 200);
-  const html = await pagina.text();
-  assert.match(html, /Claude/);
-  const tx = /name="tx" value="([^"]+)"/.exec(html)![1]!;
-  let r = await fetch(`${base}/authorize`, form({ tx, paso: 'contrasena', correo, contrasena: 'bien' }));
-  if (opciones.codigo2fa) {
-    assert.equal(r.status, 200);
-    assert.match(await r.text(), /Código de verificación/);
-    r = await fetch(`${base}/authorize`, form({ tx, paso: 'codigo', codigo: opciones.codigo2fa }));
-  }
-  return r;
-}
-
-async function tokenPara(correo: string, codigo2fa?: string) {
-  const clientId = await registrar();
-  const verificador = randomBytes(32).toString('base64url');
-  const r = await autorizar(clientId, correo, { codigo2fa, verificador });
-  assert.equal(r.status, 302);
-  const destino = new URL(r.headers.get('location')!);
-  assert.equal(`${destino.origin}${destino.pathname}`, REDIRECT);
-  assert.equal(destino.searchParams.get('state'), 'estado-1');
-  assert.equal(destino.searchParams.get('iss'), base);
-  const t = await fetch(
-    `${base}/token`,
-    form({ grant_type: 'authorization_code', code: destino.searchParams.get('code')!, client_id: clientId, redirect_uri: REDIRECT, code_verifier: verificador, resource: `${base}/mcp` }),
-  );
-  assert.equal(t.status, 200);
-  const cuerpo = (await t.json()) as { access_token: string; refresh_token: string; token_type: string; expires_in: number };
-  assert.equal(cuerpo.token_type, 'Bearer');
-  return { ...cuerpo, clientId, codigo: destino.searchParams.get('code')!, verificador };
-}
+const registrar = () => apoyo.registrar(base);
+const autorizar = (clientId: string, correo: string, opciones: { codigo2fa?: string; verificador: string }) => apoyo.autorizar(base, clientId, correo, opciones);
+const tokenPara = (correo: string, codigo2fa?: string) => apoyo.tokenPara(base, correo, codigo2fa);
 
 async function cliente(token?: string) {
   const c = new Client({ name: 'prueba', version: '1.0.0' });

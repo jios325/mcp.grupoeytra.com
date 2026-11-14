@@ -101,7 +101,11 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
   const limiteLogin = new Limitador(20, 15 * 60_000);
   const limiteAutorizar = new Limitador(60, 15 * 60_000);
   // Por cuenta solo cuentan los fallos: un tercero no puede bloquear a alguien con intentos en blanco.
-  const fallosCorreo = new Limitador(10, 15 * 60_000);
+  // El tope corto de contraseñas es por cuenta y dirección, para que diez fallos de un extraño no dejen
+  // fuera a la persona desde la suya; el tope por cuenta sola es más alto y frena a quien reparte los
+  // intentos entre muchas direcciones.
+  const fallosCorreoIp = new Limitador(10, 15 * 60_000);
+  const fallosCorreo = new Limitador(30, 15 * 60_000);
   const fallosCodigo = new Limitador(5, 15 * 60_000);
   const limiteRegistro = new Limitador(20, 60 * 60_000);
   const limiteToken = new Limitador(120, 60 * 60_000);
@@ -269,22 +273,30 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
       const codigo = texto(cuerpo.codigo, 6);
       if (!codigo || !/^\d{6}$/.test(codigo)) return html(res, 400, paginaCodigo({ ...comun, error: 'El código tiene 6 dígitos.' }));
       // Tope por cuenta (no solo por IP): quien ya tiene la contraseña no puede probar códigos sin fin.
-      if (fallosCodigo.excedido(tx.correo)) return html(res, 429, paginaCodigo({ ...comun, error: 'Demasiados códigos incorrectos. Espere 15 minutos.' }));
-      resultado = await login.conCodigo(tx.segundoFactor.sesion, tx.segundoFactor.factorId, codigo);
-      if (resultado.tipo === 'error') {
-        fallosCodigo.sumar(tx.correo);
-        return html(res, 401, paginaCodigo({ ...comun, error: resultado.mensaje }));
-      }
+      // La cuenta y el factor se leen antes de esperar: otra petición sobre la misma transacción puede
+      // cambiarlos mientras tanto, y el fallo se cobraría a otra cuenta. El intento se aparta antes de
+      // esperar para que los que llegan juntos no pasen todos.
+      const cuenta = tx.correo;
+      const factor = tx.segundoFactor;
+      if (!fallosCodigo.reservar(cuenta)) return html(res, 429, paginaCodigo({ ...comun, error: 'Demasiados códigos incorrectos. Espere 15 minutos.' }));
+      resultado = await login.conCodigo(factor.sesion, factor.factorId, codigo);
+      if (resultado.tipo === 'error') return html(res, 401, paginaCodigo({ ...comun, error: resultado.mensaje }));
+      fallosCodigo.devolver(cuenta);
     } else {
       const correo = texto(cuerpo.correo, 254)?.trim().toLowerCase() ?? null;
       const contrasena = texto(cuerpo.contrasena, 200);
       if (!correo || !contrasena) return html(res, 400, paginaLogin({ ...comun, error: 'Escriba su correo y su contraseña.', correo: correo ?? '' }));
-      if (fallosCorreo.excedido(correo)) return html(res, 429, paginaLogin({ ...comun, error: 'Demasiados intentos con este correo. Espere 15 minutos.', correo }));
-      resultado = await login.conContrasena(correo, contrasena);
-      if (resultado.tipo === 'error') {
-        fallosCorreo.sumar(correo);
-        return html(res, 401, paginaLogin({ ...comun, error: resultado.mensaje, correo }));
+      const demasiados = () => html(res, 429, paginaLogin({ ...comun, error: 'Demasiados intentos con este correo. Espere 15 minutos.', correo }));
+      const desdeAqui = `${correo}|${ipDe(req, config)}`;
+      if (!fallosCorreoIp.reservar(desdeAqui)) return demasiados();
+      if (!fallosCorreo.reservar(correo)) {
+        fallosCorreoIp.devolver(desdeAqui);
+        return demasiados();
       }
+      resultado = await login.conContrasena(correo, contrasena);
+      if (resultado.tipo === 'error') return html(res, 401, paginaLogin({ ...comun, error: resultado.mensaje, correo }));
+      fallosCorreoIp.devolver(desdeAqui);
+      fallosCorreo.devolver(correo);
       if (resultado.tipo === 'segundo_factor') {
         tx.segundoFactor = { sesion: resultado.sesion, factorId: resultado.factorId };
         tx.correo = correo;
@@ -330,7 +342,9 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
 
     let usuarioId: string;
     let aal: Aal;
-    let familia: string;
+    /** Refresh que se renueva; null cuando se canjea un código y empieza una familia nueva. */
+    let anterior: string | null = null;
+    const sinSesion = () => errorToken(res, 400, 'invalid_grant', 'La sesión venció o fue revocada. Vuelva a iniciar sesión.');
     if (p.grant_type === 'authorization_code') {
       const codigo = texto(p.code, 200);
       const verificador = texto(p.code_verifier, 128);
@@ -340,10 +354,8 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
       }
       usuarioId = datos.usuario_id;
       aal = datos.aal;
-      familia = aleatorio(16);
     } else if (p.grant_type === 'refresh_token') {
       const token = texto(p.refresh_token, 200);
-      const sinSesion = () => errorToken(res, 400, 'invalid_grant', 'La sesión venció o fue revocada. Vuelva a iniciar sesión.');
       const visto = token ? almacen.verRefresh(token) : null;
       if (!token || !visto || visto.client_id !== cliente.client_id) return sinSesion();
       // Cada renovación confirma con la API que la persona sigue activa y con acceso, antes de gastar el
@@ -357,21 +369,29 @@ export function rutasOAuth(dep: DependenciasOAuth): Router {
         res.set('Retry-After', '60');
         return errorToken(res, 503, 'temporarily_unavailable', 'Intente de nuevo en un minuto.');
       }
-      const uso = almacen.usarRefresh(token);
-      if (!uso.ok) {
-        if (uso.motivo === 'reusado') console.warn('[oauth] refresh token reusado: familia revocada', { cliente: cliente.client_id });
-        return sinSesion();
-      }
-      usuarioId = uso.datos.usuario_id;
+      usuarioId = visto.usuario_id;
       // El doble factor se pasó al iniciar sesión y la familia lo conserva: renovar no lo pide de nuevo.
-      aal = uso.datos.aal;
-      familia = uso.datos.familia;
+      aal = visto.aal;
+      anterior = token;
     } else {
       return errorToken(res, 400, 'unsupported_grant_type', 'Solo authorization_code y refresh_token.');
     }
 
     const accessToken = await tokens.firmar(usuarioId, aal, cliente.client_id, SCOPE);
-    const refreshToken = almacen.emitirRefresh({ familia, client_id: cliente.client_id, usuario_id: usuarioId, aal, scope: SCOPE, vence: Date.now() + DURACION_REFRESH_MS });
+    const vence = Date.now() + DURACION_REFRESH_MS;
+    let refreshToken: string;
+    if (anterior) {
+      // Gastar el refresh y emitir el siguiente va junto y después de la última espera: si entre uno y
+      // otro se colara un reúso o una revocación, el nuevo nacería en una familia ya revocada.
+      const rotacion = almacen.rotarRefresh(anterior, vence);
+      if (!rotacion.ok) {
+        if (rotacion.motivo === 'reusado') console.warn('[oauth] refresh token reusado: familia revocada', { cliente: cliente.client_id });
+        return sinSesion();
+      }
+      refreshToken = rotacion.token;
+    } else {
+      refreshToken = almacen.emitirRefresh({ familia: aleatorio(16), client_id: cliente.client_id, usuario_id: usuarioId, aal, scope: SCOPE, vence });
+    }
     res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' }).json({
       access_token: accessToken,
       token_type: 'Bearer',

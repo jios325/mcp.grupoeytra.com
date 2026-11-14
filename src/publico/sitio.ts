@@ -14,7 +14,33 @@ export interface EntradaSitio {
 const TTL_INDICE_MS = 10 * 60_000;
 const TIEMPO_MAXIMO_MS = 8_000;
 const TAMANO_MAXIMO = 2 * 1024 * 1024;
+const DESCARGAS_SIMULTANEAS = 8;
 export const LARGO_PAGINA = 12_000;
+
+/**
+ * Lee el cuerpo por partes y corta al llegar al tope. `respuesta.text()` lo bajaría entero antes de
+ * recortar, y Content-Length no sirve de aviso: falta en las respuestas por partes y, en las
+ * comprimidas, mide lo comprimido.
+ */
+async function leerHasta(respuesta: Response, maximo: number): Promise<string> {
+  const lector = respuesta.body?.getReader();
+  if (!lector) return '';
+  const partes: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await lector.read();
+    if (done) break;
+    const cabe = maximo - total;
+    if (value.byteLength >= cabe) {
+      partes.push(value.subarray(0, cabe));
+      await lector.cancel().catch(() => undefined);
+      break;
+    }
+    partes.push(value);
+    total += value.byteLength;
+  }
+  return Buffer.concat(partes).toString('utf8');
+}
 
 export const normalizar = (texto: string) =>
   texto
@@ -100,27 +126,39 @@ export class Sitio {
     return url;
   }
 
+  private descargas = 0;
+
   private async pedir(url: URL, acepta: string): Promise<{ status: number; texto: string; url: URL }> {
-    // Las redirecciones se siguen a mano para no salir del dominio.
-    let actual = url;
-    for (let salto = 0; salto < 5; salto++) {
-      const respuesta = await fetch(actual, {
-        redirect: 'manual',
-        headers: { Accept: acepta, 'User-Agent': 'mcp.grupoeytra.com' },
-        signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
-      });
-      if (respuesta.status >= 300 && respuesta.status < 400) {
-        const destino = this.resolver(new URL(respuesta.headers.get('location') ?? '', actual).toString());
-        if (!destino) return { status: 404, texto: '', url: actual };
-        actual = destino;
-        continue;
+    // Tope de descargas a la vez: cada una puede guardar hasta TAMANO_MAXIMO y el proceso es uno para todos.
+    if (this.descargas >= DESCARGAS_SIMULTANEAS) return { status: 429, texto: '', url };
+    this.descargas += 1;
+    try {
+      // Las redirecciones se siguen a mano para no salir del dominio.
+      let actual = url;
+      for (let salto = 0; salto < 5; salto++) {
+        const respuesta = await fetch(actual, {
+          redirect: 'manual',
+          headers: { Accept: acepta, 'User-Agent': 'mcp.grupoeytra.com' },
+          signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
+        });
+        if (respuesta.status >= 300 && respuesta.status < 400) {
+          void respuesta.body?.cancel().catch(() => undefined);
+          const destino = this.resolver(new URL(respuesta.headers.get('location') ?? '', actual).toString());
+          if (!destino) return { status: 404, texto: '', url: actual };
+          actual = destino;
+          continue;
+        }
+        const largo = Number(respuesta.headers.get('content-length') ?? 0);
+        if (largo > TAMANO_MAXIMO) {
+          void respuesta.body?.cancel().catch(() => undefined);
+          return { status: 413, texto: '', url: actual };
+        }
+        return { status: respuesta.status, texto: await leerHasta(respuesta, TAMANO_MAXIMO), url: actual };
       }
-      const largo = Number(respuesta.headers.get('content-length') ?? 0);
-      if (largo > TAMANO_MAXIMO) return { status: 413, texto: '', url: actual };
-      const texto = await respuesta.text();
-      return { status: respuesta.status, texto: texto.slice(0, TAMANO_MAXIMO), url: actual };
+      return { status: 508, texto: '', url: actual };
+    } finally {
+      this.descargas -= 1;
     }
-    return { status: 508, texto: '', url: actual };
   }
 
   /** Índice de llms.txt (con caché de 10 minutos) y su encabezado (qué es la empresa y contacto). */
@@ -140,6 +178,7 @@ export class Sitio {
     if (!url) return { ok: false as const, error: `Solo se pueden leer páginas de ${this.base}.` };
     const { status, texto, url: final } = await this.pedir(url, 'text/html');
     if (status === 404) return { ok: false as const, error: `La página ${final.pathname} no existe en el sitio.` };
+    if (status === 429) return { ok: false as const, error: 'Hay muchas lecturas del sitio en curso. Intente de nuevo en unos segundos.' };
     if (status !== 200) return { ok: false as const, error: `El sitio respondió ${status} para ${final.pathname}.` };
     const pagina = extraerTexto(texto);
     const tramo = pagina.texto.slice(desde, desde + LARGO_PAGINA);

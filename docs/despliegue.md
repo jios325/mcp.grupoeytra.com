@@ -50,6 +50,7 @@ ssh grupoeytra 'set -e; cd /var/www/mcp.grupoeytra.com && git pull --ff-only ori
 
 ## Notas
 
+- `docker exec eytra-mcp printenv CLIENT_IP_HEADER` debe decir `x-forwarded-for`. Vacío, todos los clientes comparten los límites por IP y cualquiera puede dejar a los demás sin iniciar sesión; el servidor lo avisa en el log al arrancar (`[mcp] AVISO`).
 - El CMS consulta `/me` por cada inicio de sesión y renovación; la llave tiene 600 llamadas por hora en la API para todos los usos del MCP.
 - Cambiar `MCP_TOKEN_SECRET` invalida al instante los access tokens; los clientes renuevan con su refresh token sin volver a iniciar sesión. Para cerrar todas las sesiones, además borrar el volumen `mcp_datos`.
 - Revocar la llave «MCP» en el CMS deja fuera todo lo privado al instante; lo público del sitio y las vistas sigue funcionando salvo `documentos`.

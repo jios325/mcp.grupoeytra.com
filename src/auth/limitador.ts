@@ -28,6 +28,22 @@ export class Limitador {
     return (this.vigente(clave)?.n ?? 0) >= this.maximo;
   }
 
+  /**
+   * Para contar solo fallos cuando la comprobación espera a otro servicio: aparta el intento antes de
+   * esperar y lo devuelve con devolver() si salió bien. Con excedido() + sumar(), los intentos que
+   * llegan juntos pasan todos antes de que el primero termine de fallar.
+   */
+  reservar(clave: string): boolean {
+    if (this.excedido(clave)) return false;
+    this.sumar(clave);
+    return true;
+  }
+
+  devolver(clave: string) {
+    const actual = this.vigente(clave);
+    if (actual && actual.n > 0) actual.n -= 1;
+  }
+
   sumar(clave: string) {
     const actual = this.vigente(clave);
     if (actual) actual.n += 1;

@@ -79,7 +79,12 @@ const INSTRUCCIONES = `Servidor de Grupo Eytra (tratamiento y análisis de agua 
 - Responda en el idioma de la pregunta (español de México, de usted, si es en español). No invente cifras ni políticas: si un dato no está en las herramientas, dígalo. No complete con suposiciones lo que los datos no dicen (plazos de procesamiento, límites para facturar, de qué depende un precio, condiciones por zona); diga lo que sí está y ofrezca confirmarlo con Eytra.`;
 
 export function crearServidor(dep: Dependencias, ctx: Contexto): McpServer {
-  const servidor = new McpServer({ name: 'grupo-eytra', title: 'Grupo Eytra', version: VERSION }, { instructions: INSTRUCCIONES });
+  // La lista de herramientas no cambia a media sesión (solo al iniciar sesión, que es otro token), y el
+  // servidor no emite avisos. Declararlo evita que cualquiera deje abiertas escuchas que nunca reciben nada.
+  const servidor = new McpServer(
+    { name: 'grupo-eytra', title: 'Grupo Eytra', version: VERSION },
+    { instructions: INSTRUCCIONES, capabilities: { tools: { listChanged: false } } },
+  );
   registrarPublicas(servidor, dep, ctx);
   registrarPrivadas(servidor, dep, ctx);
   return servidor;

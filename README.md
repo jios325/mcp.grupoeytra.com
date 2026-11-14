@@ -29,14 +29,16 @@ La API del asistente confía en el encabezado `X-Eytra-User` porque la llave est
 1. Claude llama una herramienta privada sin token → el MCP responde `401` con `WWW-Authenticate` (autenticación perezosa: lo público no pide login).
 2. Claude descubre el servidor de autorización (`/.well-known/oauth-protected-resource/mcp` → `/.well-known/oauth-authorization-server`), se registra (`/register`, RFC 7591) y abre `/authorize` con PKCE S256.
 3. La persona escribe el correo y la contraseña del portal o del CMS; si tiene app de autenticación, el código de 6 dígitos. El MCP lo comprueba contra Supabase Auth, cierra esa sesión de Supabase de inmediato y pregunta a la API (`/me`) si la persona puede usar el asistente.
-4. El MCP emite su propio access token (JWT de 1 hora con audiencia `…/mcp`) y un refresh token de 30 días que rota en cada uso; si alguien reusa uno viejo, se revoca toda la sesión. Cada renovación vuelve a consultar `/me`: desactivar a la persona en el CMS la deja fuera.
+4. El MCP emite su propio access token (JWT de 1 hora con audiencia `…/mcp`) y un refresh token de 30 días que rota en cada uso; si alguien reusa uno viejo, se revoca toda la sesión (los ya usados se guardan hasta vencer para poder detectarlo, y gastar uno y emitir el siguiente es un solo paso). Cada renovación vuelve a consultar `/me`: desactivar a la persona en el CMS la deja fuera.
 5. En cada llamada privada el MCP manda a la API el **id de Supabase** de la persona, nunca un dato que alguien escribió, y `X-Eytra-AAL: aal2` si pasó su app de autenticación al iniciar sesión. Ese nivel queda en el access token y en la familia del refresh token: renovar no lo sube ni lo pide de nuevo.
 
 Protecciones adicionales (revisión de seguridad del 26 oct 2026):
 
 - El login solo regresa a `claude.ai`, `claude.com`, `chatgpt.com` (`MCP_REDIRECT_HOSTS`) o a `localhost`; así nadie puede registrar un cliente llamado «Claude» que se quede con el código. Para otros clientes MCP, agregar su host a esa variable.
 - Los errores antes del login muestran una página y no redirigen (sin redirecciones abiertas).
-- Límites: por IP en `/authorize`, `/register` y `/token`; por cuenta solo los fallos de contraseña (10 cada 15 min) y de código (5 cada 15 min); 120 llamadas a herramientas cada 15 min por IP sin sesión, y 150 llamadas por hora a la API sin persona en total (la llave tiene 600 por hora en la API para todos).
+- Límites: por IP en `/authorize`, `/register` y `/token`; por cuenta solo los fallos, que se apartan antes de consultar a Supabase para que los intentos simultáneos no pasen juntos: contraseña, 10 cada 15 min por cuenta y dirección y 30 por cuenta entre todas las direcciones (así un extraño no deja fuera a la persona con diez intentos); código, 5 cada 15 min por cuenta. Sin sesión: 120 llamadas a herramientas cada 15 min por IP, 30 por hora por IP a `documentos` y `leer_documento`, y 150 por hora a la API sin persona en total. Con sesión: 120 llamadas a herramientas por hora por persona (la llave tiene 600 por hora en la API para todos, y la API la cobra antes que el tope por persona).
+- `/mcp` responde 415 a un POST cuyo cuerpo Express no analizó como JSON: lo que revisa la puerta es siempre lo que se ejecuta. El servidor declara que no avisa de cambios en la lista de herramientas, así que no quedan escuchas (`subscriptions/listen`) abiertas.
+- `leer_pagina` corta la descarga a los 2 MB aunque la página no declare su tamaño y hace como máximo 8 descargas a la vez.
 - Un 429 o una caída de la API nunca cierra sesiones: solo un 403/404 de `/me` (persona desactivada o sin acceso).
 - `leer_pagina` solo pide el esquema, host y puerto del sitio (sin saltar a otros puertos del servidor).
 
@@ -94,7 +96,8 @@ docker compose up -d --build
 
 - **Por qué un servidor de autorización propio y no el OAuth Server de Supabase**: el de Supabase está en beta, no está documentado para self-hosted, exige una pantalla de consentimiento en el CMS y emite tokens con `aud: authenticated` en lugar de la URL del MCP. Si se adopta más adelante, solo cambia `src/auth/`.
 - **Canal en la bitácora**: la API no tiene canal `mcp`; se usa `other` y la llave «MCP» lo distingue en `assistant_log`. Un canal propio requiere una migración en el CMS (`assistant_channel`).
-- **Super Admin y Finanzas**: hoy no entran (la API los rechaza porque una llave no es un segundo factor). El MCP sí verifica su código TOTP, así que podría habilitarse con un cambio en `assistant_call` que acepte personas verificadas con aal2.
+- **Sesiones y cambios de credencial** (pendiente, auditoría del 14 nov 2026): una sesión del MCP ya emitida no se entera de un cambio de contraseña ni del alta o la baja del doble factor en Supabase; solo la corta un 403/404 de `/me`, y cada renovación le da otros 30 días. Cerrarlo requiere que `/me` devuelva una marca del último cambio de credenciales (CMS) y que el MCP revoque las familias anteriores a esa marca, además de una vida máxima por familia.
+- **Cupo de la llave en la API** (pendiente en el CMS): `assistant_call` descuenta el cupo de la llave antes que el de la persona, así que las llamadas que rechaza por persona también lo gastan. El MCP lo compensa con su tope por persona; lo correcto es invertir el orden en el CMS.
 - **CIMD** (Client ID Metadata Documents): no implementado; Claude y ChatGPT usan el registro dinámico (`/register`), que es lo que anuncia el servidor.
 - SDK: `@modelcontextprotocol/server` v2 (spec 2026-07-28) con respaldo sin estado para clientes de la spec 2025.
 
