@@ -4,6 +4,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
+COPY vista ./vista
+COPY scripts/construir-vista.mjs ./scripts/construir-vista.mjs
 RUN npm run build && npm prune --omit=dev --ignore-scripts
 
 FROM node:24-alpine

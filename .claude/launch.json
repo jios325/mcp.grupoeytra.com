@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "previa-vista",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "vista:previa"],
+      "port": 8332
+    }
+  ]
+}

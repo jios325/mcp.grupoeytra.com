@@ -8,15 +8,18 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "vista": "node scripts/construir-vista.mjs",
+    "vista:previa": "node scripts/previa-vista.mjs",
+    "dev": "npm run vista && tsx watch --env-file-if-exists=.env src/index.ts",
     "start": "node --env-file-if-exists=.env dist/index.js",
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts",
+    "build": "npm run vista && tsc -p tsconfig.build.json",
+    "typecheck": "npm run vista && tsc --noEmit && tsc --noEmit -p vista",
+    "test": "npm run vista && tsx --test test/*.test.ts",
     "verify": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/express": "^2.0.2",
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@modelcontextprotocol/node": "^2.1.2",
     "@modelcontextprotocol/server": "^2.4.0",
     "@supabase/supabase-js": "^2.118.0",
@@ -30,6 +33,7 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

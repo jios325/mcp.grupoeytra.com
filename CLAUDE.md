@@ -16,6 +16,7 @@ Servidor MCP de Grupo Eytra (Node + TypeScript, SDK `@modelcontextprotocol/serve
 ```bash
 npm run dev       # :8330 (CMS en :3300 y Supabase en :8300 arriba)
 npm run verify    # tipos + pruebas + build; una tarea termina con esto en verde
+npm run vista:previa   # :8332, las vistas de MCP Apps con datos de ejemplo (vista/)
 npx tsx scripts/humo.ts http://localhost:8330   # prueba de humo contra el servidor en marcha
 ```
 
@@ -24,6 +25,7 @@ npx tsx scripts/humo.ts http://localhost:8330   # prueba de humo contra el servi
 - **Nunca** acceder a la base del CMS directo ni con `service_role`: lo privado va por la API del asistente, que aplica RLS y deja bitácora. Lo público, solo vistas `*_public` con la llave publicable.
 - `X-Eytra-User` lleva siempre el id de Supabase que salió del login verificado, nunca un correo o teléfono que alguien escribió.
 - Una herramienta nueva que toque datos de una persona: primero en `assistant_call` (CMS), luego aquí en `PROTEGIDAS` de `src/herramientas.ts` con la herramienta de la API que la respalda.
+- Vistas (MCP Apps, `vista/` y `src/vistas.ts`): la vista nunca llama al CMS ni a la red, solo pide herramientas de este MCP al cliente; lo que recibe se escribe como texto, nunca `innerHTML`. Una herramienta nueva con vista: agregarla a `CON_VISTA`, a `VISTAS` en `vista/app.ts` y a los ejemplos de `scripts/previa-vista.mjs`.
 - `leer_pagina` solo lee el dominio de `EYTRA_SITE_URL` (no es un proxy).
 - Textos para el usuario en español de México, de usted; identificadores en español como el resto del código.
 - `.env` y `data/` no se versionan ni se leen en voz alta.

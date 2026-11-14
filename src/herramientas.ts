@@ -7,6 +7,7 @@ import type { Aal, ClienteAsistente, Persona, Resultado } from './asistente.js';
 import type { CmsPublico } from './publico/cms.js';
 import { articulosDelIndice, buscarEntradas, type Sitio } from './publico/sitio.js';
 import type { Limitador } from './auth/limitador.js';
+import { metaDeVista, registrarVistas } from './vistas.js';
 
 // Herramientas del MCP. Hay tres alcances, los mismos de la API del asistente:
 //   - público: cualquiera, sin sesión (sitio, catálogo, blog, tienda, documentos públicos);
@@ -79,12 +80,13 @@ const INSTRUCCIONES = `Servidor de Grupo Eytra (tratamiento y análisis de agua 
 - Responda en el idioma de la pregunta (español de México, de usted, si es en español). No invente cifras ni políticas: si un dato no está en las herramientas, dígalo. No complete con suposiciones lo que los datos no dicen (plazos de procesamiento, límites para facturar, de qué depende un precio, condiciones por zona); diga lo que sí está y ofrezca confirmarlo con Eytra.`;
 
 export function crearServidor(dep: Dependencias, ctx: Contexto): McpServer {
-  // La lista de herramientas no cambia a media sesión (solo al iniciar sesión, que es otro token), y el
-  // servidor no emite avisos. Declararlo evita que cualquiera deje abiertas escuchas que nunca reciben nada.
+  // La lista de herramientas no cambia a media sesión (solo al iniciar sesión, que es otro token), la de
+  // recursos (las vistas ui:// de vistas.ts) es fija y el servidor no emite avisos. Declararlo evita que cualquiera deje abiertas escuchas que nunca reciben nada.
   const servidor = new McpServer(
     { name: 'grupo-eytra', title: 'Grupo Eytra', version: VERSION },
-    { instructions: INSTRUCCIONES, capabilities: { tools: { listChanged: false } } },
+    { instructions: INSTRUCCIONES, capabilities: { tools: { listChanged: false }, resources: { listChanged: false } } },
   );
+  registrarVistas(servidor);
   registrarPublicas(servidor, dep, ctx);
   registrarPrivadas(servidor, dep, ctx);
   return servidor;
@@ -95,6 +97,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'buscar_en_sitio',
     {
+      _meta: metaDeVista('buscar_en_sitio'),
       title: 'Buscar en grupoeytra.com',
       description:
         'Busca páginas del sitio público de Grupo Eytra usando su índice llms.txt: servicios, sectores, cobertura por ciudad, laboratorio, normas NOM, productos, recursos (calculadora de dosificación de cloro, guías) y artículos del blog. Devuelve título, URL y descripción; después lea la página con leer_pagina. Sin consulta devuelve el índice completo y el resumen de la empresa. Úsela primero en preguntas técnicas o de cálculo: el sitio tiene una calculadora de dosificación de cloro; enlácela en lugar de calcular por su cuenta.' + SOLO_SITIO,
@@ -113,6 +116,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'leer_pagina',
     {
+      _meta: metaDeVista('leer_pagina'),
       title: 'Leer una página del sitio',
       description:
         'Devuelve el texto de una página de grupoeytra.com (ruta como "/laboratorio" o URL completa del mismo sitio). Si la página es larga, la respuesta trae continuar_desde para pedir el siguiente tramo.' + SOLO_SITIO,
@@ -134,6 +138,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'datos_de_contacto',
     {
+      _meta: metaDeVista('datos_de_contacto'),
       title: 'Datos de contacto y horario',
       description: 'Teléfono, WhatsApp, correo, dirección, horario y zona de entrega de Grupo Eytra, más el resumen de la empresa.',
       inputSchema: z.object({}),
@@ -154,6 +159,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'catalogo_de_productos',
     {
+      _meta: metaDeVista('catalogo_de_productos'),
       title: 'Catálogo de productos',
       description:
         'Productos publicados en la tienda de Grupo Eytra con precio de lista en MXN (IVA incluido), modo de venta y presentación. Devuelve hasta 50 productos, el total que coincide y si hay más; para el más barato o el más caro use orden "precio_asc" o "precio_desc" en una sola llamada.' + SOLO_DATOS,
@@ -170,6 +176,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'envios_devoluciones_y_pagos',
     {
+      _meta: metaDeVista('envios_devoluciones_y_pagos'),
       title: 'Envíos, devoluciones y pagos de la tienda',
       description: 'Formas de entrega (cobertura, costo, envío gratis, tiempos, si llevan químicos), políticas de devolución, hora de corte, formas de pago y facturación de la tienda en línea.' + SOLO_DATOS,
       inputSchema: z.object({}),
@@ -181,6 +188,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'articulos_del_blog',
     {
+      _meta: metaDeVista('articulos_del_blog'),
       title: 'Artículos del blog',
       description: 'Lista los artículos técnicos publicados en el blog con su slug, título, extracto y URL. Para leer uno completo use leer_articulo con su slug.',
       inputSchema: z.object({
@@ -213,6 +221,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'leer_articulo',
     {
+      _meta: metaDeVista('leer_articulo'),
       title: 'Leer un artículo del blog',
       description:
         'Texto completo de un artículo publicado del blog (Markdown), con autor, revisor, normas y productos relacionados cuando el CMS los tiene. Si la respuesta trae continuar_desde, pida el resto con leer_pagina y esa URL.' + SOLO_SITIO,
@@ -234,6 +243,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'documentos',
     {
+      _meta: metaDeVista('documentos'),
       title: 'Documentos de la base de conocimiento',
       description:
         'Lista los documentos de la base de conocimiento de Grupo Eytra (fichas, guías, políticas). Sin sesión solo los públicos; el equipo de Eytra con sesión también ve los internos. Use leer_documento para obtener el enlace.',
@@ -246,6 +256,7 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'leer_documento',
     {
+      _meta: metaDeVista('leer_documento'),
       title: 'Enlace a un documento',
       description: 'Devuelve un enlace de descarga a un documento de la base de conocimiento. El enlace caduca en 60 segundos: compártalo de inmediato.',
       inputSchema: z.object({ id: z.uuid().describe('id del documento (de la herramienta documentos)') }),
@@ -290,6 +301,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'mi_cuenta',
       {
+        _meta: metaDeVista('mi_cuenta'),
         title: 'Mi cuenta',
         description: `Quién es usted en Grupo Eytra: nombre, correo, rol, empresa y qué herramientas privadas puede usar.${sesion}`,
         inputSchema: z.object({}),
@@ -303,6 +315,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'estado_de_cuenta',
       {
+        _meta: metaDeVista('estado_de_cuenta'),
         title: 'Estado de cuenta',
         description: `Saldo de la empresa: total por pagar, vencido, facturas abiertas (folio, fechas, total, saldo, estado) y último pago. Solo usuarios de empresas cliente.${sesion}`,
         inputSchema: z.object({}),
@@ -316,6 +329,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'archivos_de_factura',
       {
+        _meta: metaDeVista('archivos_de_factura'),
         title: 'PDF y XML de una factura',
         description: `Enlaces al PDF y al XML de una factura de su empresa, por folio (A-123) o UUID fiscal. Los enlaces caducan en 60 segundos: compártalos de inmediato.${sesion}`,
         inputSchema: z.object({ folio: z.string().trim().min(1).max(60).regex(/^[A-Za-z0-9-]+$/).describe('Folio (A-123) o UUID fiscal') }),
@@ -329,6 +343,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'resultados_de_laboratorio',
       {
+        _meta: metaDeVista('resultados_de_laboratorio'),
         title: 'Resultados de laboratorio',
         description: `Último resultado publicado de cada punto de muestreo de su empresa (o de una propiedad), con parámetros, valores, límites y si cumple. Solo resultados validados.${sesion}`,
         inputSchema: z.object({ propiedad: z.string().max(80).optional().describe('Nombre (o parte) de la propiedad') }),
@@ -342,6 +357,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'crear_solicitud',
       {
+        _meta: metaDeVista('crear_solicitud'),
         title: 'Crear solicitud de trabajo',
         description: `Crea una solicitud para el equipo de Eytra a nombre de su empresa (muestreo, químicos, mantenimiento, documentos, cambio de plan u otra). Confirme con el usuario el tipo, el título y la descripción antes de crearla.${sesion}`,
         inputSchema: z.object({
@@ -378,6 +394,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'resumen_del_dia',
       {
+        _meta: metaDeVista('resumen_del_dia'),
         title: 'Resumen del día (equipo Eytra)',
         description: `Resumen diario para el equipo de Eytra: facturado, cobrado, por cobrar, igualas, muestras fuera de norma, inventario, solicitudes y pendientes de atención. Solo personal de Eytra.${sesion}`,
         inputSchema: z.object({}),
@@ -391,6 +408,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'crear_cotizacion',
       {
+        _meta: metaDeVista('crear_cotizacion'),
         title: 'Crear cotización en borrador (equipo Eytra)',
         description: `Deja una cotización EN BORRADOR en el CMS para un cliente o prospecto; nunca se envía ni se aprueba desde aquí: el equipo revisa precios, la aprueba y la envía desde Cotizaciones. Los precios los pone el sistema (lista de precios o tienda sin IVA); las partidas libres que no están en la lista quedan en cero para que el equipo las cotice. Use producto con el slug de catalogo_de_productos, o descripcion para servicios (análisis, visitas, igualas). Si la empresa no existe, se crea como prospecto. Antes de crearla, confirme con el usuario el cliente, el contacto (correo o teléfono) y las partidas; después dé el folio y el enlace. Solo personal de Eytra con permiso de cotizar.${sesion}`,
         inputSchema: z.object({
@@ -463,6 +481,7 @@ function registrarPrivadas(servidor: McpServer, { asistente }: Dependencias, ctx
     servidor.registerTool(
       'estado_de_cotizacion',
       {
+        _meta: metaDeVista('estado_de_cotizacion'),
         title: 'Estado de una cotización (equipo Eytra)',
         description: `Estado, cliente, partidas y totales de una cotización por su folio (ET-2611642). Solo personal de Eytra con permiso en Cotizaciones.${sesion}`,
         inputSchema: z.object({ folio: z.string().trim().min(1).max(40).regex(/^[A-Za-z0-9-]+$/).describe('Folio de la cotización, p. ej. ET-2611642') }),

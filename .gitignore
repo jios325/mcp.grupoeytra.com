@@ -6,6 +6,9 @@ data/
 !.env.example
 *.log
 
+# Vista de MCP Apps empaquetada (npm run vista la regenera desde vista/)
+src/vista.generada.ts
+
 # Evaluaciones (.claude/hillclimb): transcripciones y reportes se regeneran al correrlas
 **/traces/
 .claude/hillclimb/**/report.html
