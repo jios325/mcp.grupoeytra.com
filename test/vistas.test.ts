@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test';
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
-import { CON_VISTA, uriDeVista, type HerramientaConVista } from '../src/vistas.js';
+import { CON_VISTA, dominioParaClaude, esOtroCliente, uriDeVista, type HerramientaConVista } from '../src/vistas.js';
 import * as apoyo from './apoyo.js';
 import type { AppDePrueba } from './apoyo.js';
 
@@ -19,9 +19,9 @@ before(async () => {
 
 after(() => app.cerrar());
 
-async function cliente(token?: string) {
+async function cliente(token?: string, agente?: string, origen = base) {
   const c = new Client({ name: 'prueba', version: '1.0.0' });
-  await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), token ? { requestInit: { headers: { Authorization: `Bearer ${token}` } } } : {}));
+  await c.connect(new StreamableHTTPClientTransport(new URL(`${origen}/mcp`), { requestInit: { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(agente ? { 'User-Agent': agente } : {}) } } }));
   return c;
 }
 
@@ -31,8 +31,13 @@ describe('vistas (MCP Apps)', () => {
   test('cada herramienta apunta a su recurso ui://, con la llave actual y la anterior', async () => {
     const c = await cliente();
     const { tools } = await c.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...CON_VISTA].sort());
-    for (const t of tools) {
+    // Las de lectura larga van sin vista: son texto para el modelo.
+    const sinVista = tools.filter((t) => !(CON_VISTA as readonly string[]).includes(t.name));
+    assert.deepEqual(sinVista.map((t) => t.name).sort(), ['leer_articulo', 'leer_pagina']);
+    assert.ok(sinVista.every((t) => (t._meta as MetaDeVista)?.ui === undefined));
+    const conVista = tools.filter((t) => !sinVista.includes(t));
+    assert.deepEqual(conVista.map((t) => t.name).sort(), [...CON_VISTA].sort());
+    for (const t of conVista) {
       const meta = t._meta as MetaDeVista;
       const uri = uriDeVista(t.name as HerramientaConVista);
       assert.equal(meta?.ui?.resourceUri, uri, t.name);
@@ -76,7 +81,7 @@ describe('vistas (MCP Apps)', () => {
     const { tools } = await c.listTools();
     assert.ok(tools.some((t) => t.name === 'estado_de_cuenta'));
     assert.ok(!tools.some((t) => t.name === 'resumen_del_dia'));
-    assert.ok(tools.every((t) => typeof (t._meta as MetaDeVista)?.ui?.resourceUri === 'string'));
+    assert.equal(typeof (tools.find((t) => t.name === 'estado_de_cuenta')?._meta as MetaDeVista)?.ui?.resourceUri, 'string');
     await c.close();
   });
 
@@ -86,6 +91,37 @@ describe('vistas (MCP Apps)', () => {
     const texto = (r.content as { type: string; text: string }[])[0]?.text ?? '';
     assert.equal(typeof JSON.parse(texto), 'object');
     assert.equal(r.structuredContent, undefined);
+    await c.close();
+  });
+
+  test('el origen para Claude sale de la URL del conector, como en su documentación', async () => {
+    // Ejemplo de claude.com/docs/connectors/building/mcp-apps/getting-started.
+    assert.equal(dominioParaClaude('https://example.com/mcp'), 'c3d80a4ed901ee05b21755a88273b4a4.claudemcpcontent.com');
+    assert.equal(dominioParaClaude('http://localhost:8330/mcp'), null);
+    assert.equal(esOtroCliente('claude-ai', 'Claude-User'), false);
+    assert.equal(esOtroCliente(undefined, undefined), false);
+    assert.equal(esOtroCliente('ChatGPT', null), true);
+    assert.equal(esOtroCliente(null, 'Visual Studio Code/1.99'), true);
+
+    const remota = await apoyo.levantar({ recurso: 'https://example.com/mcp' });
+    try {
+      const dominioDe = async (agente: string) => {
+        const c = await cliente(undefined, agente, remota.base);
+        const { contents } = await c.readResource({ uri: uriDeVista('estado_de_cuenta') });
+        await c.close();
+        return (contents[0] as { _meta?: { ui?: { domain?: string } } })._meta?.ui?.domain;
+      };
+      assert.equal(await dominioDe('Claude-User'), 'c3d80a4ed901ee05b21755a88273b4a4.claudemcpcontent.com');
+      // El formato es de cada cliente: a uno que se identifica como otro no se le manda el de Claude.
+      assert.equal(await dominioDe('openai-mcp/1.0.0'), undefined);
+    } finally {
+      remota.cerrar();
+    }
+
+    // En local (http) no hay URL que Claude pueda validar.
+    const c = await cliente(undefined, 'Claude-User');
+    const { contents } = await c.readResource({ uri: uriDeVista('estado_de_cuenta') });
+    assert.equal((contents[0] as { _meta?: unknown })._meta, undefined);
     await c.close();
   });
 });

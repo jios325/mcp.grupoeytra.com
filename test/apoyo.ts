@@ -154,7 +154,7 @@ export interface AppDePrueba {
   cerrar: () => void;
 }
 
-export async function levantar(opciones: { encabezadoIp?: string | null } = {}): Promise<AppDePrueba> {
+export async function levantar(opciones: { encabezadoIp?: string | null; recurso?: string } = {}): Promise<AppDePrueba> {
   const config: Config = {
     urlPublica: 'http://127.0.0.1:0',
     recurso: '',
@@ -180,7 +180,8 @@ export async function levantar(opciones: { encabezadoIp?: string | null } = {}):
     });
   });
   config.urlPublica = `http://127.0.0.1:${puerto}`;
-  config.recurso = `${config.urlPublica}/mcp`;
+  // `recurso` permite probar lo que depende de la URL pública del conector (el origen de las vistas en Claude).
+  config.recurso = opciones.recurso ?? `${config.urlPublica}/mcp`;
   config.puerto = puerto;
   const asistente = new AsistenteFalso();
   const login = new LoginFalso();

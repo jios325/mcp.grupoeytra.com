@@ -72,7 +72,7 @@ export function crearApp(config: Config, piezas: Piezas = {}) {
     async (ctx) => {
       const usuarioId = typeof ctx.authInfo?.extra?.usuarioId === 'string' ? ctx.authInfo.extra.usuarioId : null;
       const aal: Aal = ctx.authInfo?.extra?.aal === 'aal2' ? 'aal2' : 'aal1';
-      return crearServidor({ sitio, cms, asistente, cupoVisitantes }, { usuarioId, aal, persona: usuarioId ? await persona(usuarioId, aal) : null });
+      return crearServidor({ sitio, cms, asistente, cupoVisitantes, recurso: config.recurso }, { usuarioId, aal, persona: usuarioId ? await persona(usuarioId, aal) : null });
     },
     // El servidor no emite avisos (herramientas.ts declara listChanged: false), así que una escucha
     // (subscriptions/listen) se cierra al abrirse; el tope bajo es por si eso cambiara.

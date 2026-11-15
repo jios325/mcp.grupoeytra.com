@@ -11,7 +11,7 @@ type Hijo = Node | string | number | null | undefined | false | Hijo[];
 type Tono = 'bien' | 'alerta' | 'mal' | '';
 type Lectura = { ok: true; datos: D } | { ok: false; error: string };
 
-const app = new App({ name: 'Grupo Eytra', version: '0.1.0' });
+const app = new App({ name: 'Grupo Eytra', version: '0.1.0' }, { availableDisplayModes: ['inline', 'fullscreen'] });
 const raiz = document.getElementById('raiz') as HTMLElement;
 
 // ───────────────────────── DOM ─────────────────────────
@@ -61,13 +61,25 @@ function boton(texto: string, accion: () => unknown, clase = ''): HTMLButtonElem
   return b;
 }
 
+// Dentro del chat la vista debe ser corta (Claude recorta lo que pasa de cierta altura y no hay scroll
+// propio): las listas largas se cortan y «Ver todo» pide pantalla completa, donde se muestran enteras.
+let completo = false;
+let recortado = false;
+
+function limitar<T>(elementos: T[], maximo: number): T[] {
+  if (completo || elementos.length <= maximo) return elementos;
+  recortado = true;
+  return elementos.slice(0, maximo);
+}
+
 interface Columna {
   titulo: string;
   celda: (fila: D) => Hijo;
   num?: boolean;
 }
 
-function tabla(columnas: Columna[], filas: D[]) {
+function tabla(columnas: Columna[], todas: D[], maximo = 6) {
+  const filas = limitar(todas, maximo);
   return h(
     'div.desborde',
     null,
@@ -190,7 +202,7 @@ function vistaBusqueda(d: D): Hijo {
     h('div.encabezado', null, h('h1', null, d.consulta ? `Resultados para «${d.consulta}»` : 'Índice de grupoeytra.com'), h('span.chico.tenue', null, `${paginas.length} ${paginas.length === 1 ? 'página' : 'páginas'}`)),
     d.resumen ? h('p.tenue', null, d.resumen) : null,
     d.nota ? aviso(d.nota) : null,
-    h('div.lista', null, paginas.map((p) => h('div.pila', null, h('div.fila', null, enlace(texto(p.titulo), p.url), p.seccion ? insignia(p.seccion) : null), p.descripcion ? h('p.chico.tenue', null, p.descripcion) : null))),
+    h('div.lista', null, limitar(paginas, 6).map((p) => h('div.pila', null, h('div.fila', null, enlace(texto(p.titulo), p.url), p.seccion ? insignia(p.seccion) : null), p.descripcion ? h('p.chico.tenue', null, p.descripcion) : null))),
   );
 }
 
@@ -232,13 +244,14 @@ function vistaCatalogo(d: D, argumentos: D = {}): Hijo {
   const cuerpo = h('div.pila');
   const pintar = (datos: D) => {
     const productos = lista(datos.productos);
+    const visibles = limitar(productos, 6);
     reemplazar(
       cuerpo,
-      h('p.chico.tenue', { role: 'status' }, productos.length === 0 ? 'Sin productos con esa búsqueda.' : `Mostrando ${productos.length} de ${texto(datos.total ?? productos.length)}${datos.hay_mas ? ' (hay más: afine la búsqueda)' : ''}.`),
+      h('p.chico.tenue', { role: 'status' }, productos.length === 0 ? 'Sin productos con esa búsqueda.' : `Mostrando ${visibles.length} de ${texto(datos.total ?? productos.length)}${datos.hay_mas ? ' (hay más: afine la búsqueda)' : ''}.`),
       h(
         'div.rejilla',
         null,
-        productos.map((p) => {
+        visibles.map((p) => {
           const presentacion = [p.pack_quantity, p.pack_unit].filter((x) => x !== null && x !== undefined && x !== '').join(' ');
           return h(
             'article.producto',
@@ -271,6 +284,8 @@ function vistaCatalogo(d: D, argumentos: D = {}): Hijo {
 function vistaTienda(d: D): Hijo {
   const entregas = lista(d.entregas);
   const devoluciones = lista(d.devoluciones);
+  // Dentro del chat, solo las entregas; devoluciones y pagos, en pantalla completa.
+  const detalle = devoluciones.length > 0 || d.ajustes ? limitar([true], 0).length > 0 : false;
   return [
     tarjeta(
       h('h1', null, 'Envíos y entregas'),
@@ -288,10 +303,10 @@ function vistaTienda(d: D): Hijo {
             entregas,
           ),
     ),
-    devoluciones.length > 0
+    detalle && devoluciones.length > 0
       ? tarjeta(h('h2', null, 'Devoluciones'), h('div.lista', null, devoluciones.map((x) => h('div.pila', null, h('div.fila', null, h('b', null, texto(x.name)), x.window_label ? insignia(String(x.window_label)) : null), x.body ? h('p.chico', null, x.body) : null, x.return_shipping ? h('p.chico.tenue', null, `Envío de la devolución: ${x.return_shipping}`) : null))))
       : null,
-    d.ajustes ? tarjeta(h('h2', null, 'Pagos y facturación'), generico(d.ajustes)) : null,
+    detalle && d.ajustes ? tarjeta(h('h2', null, 'Pagos y facturación'), generico(d.ajustes)) : null,
   ];
 }
 
@@ -309,7 +324,7 @@ function vistaBlog(d: D): Hijo {
         h(
           'div.lista',
           null,
-          articulos.map((a) =>
+          limitar(articulos, 4).map((a) =>
             h(
               'div.pila',
               null,
@@ -403,7 +418,7 @@ function vistaDocumentos(d: D): Hijo {
       : h(
           'div.lista',
           null,
-          documentos.map((doc) => {
+          limitar(documentos, 6).map((doc) => {
             const [rotulo, tono] = VISIBILIDAD[String(doc.visibility)] ?? [texto(doc.visibility), ''];
             return h(
               'div.encabezado',
@@ -413,11 +428,7 @@ function vistaDocumentos(d: D): Hijo {
                 'div.fila',
                 null,
                 doc.visibility ? insignia(rotulo, tono) : null,
-                boton('Abrir', async () => {
-                  const archivo = await llamar('leer_documento', { id: doc.id });
-                  if (!archivo.url) throw new Error('Este documento no tiene archivo.');
-                  await abrir(archivo.url);
-                }),
+                boton('Abrir', abrirDocumento(doc.id)),
               ),
             );
           }),
@@ -425,8 +436,15 @@ function vistaDocumentos(d: D): Hijo {
   );
 }
 
+/** Abre un documento pidiendo su enlace en ese momento (caduca en 60 segundos). */
+const abrirDocumento = (id: unknown) => async () => {
+  const archivo = await llamar('leer_documento', { id });
+  if (!archivo.url) throw new Error('Este documento no tiene archivo.');
+  await abrir(archivo.url);
+};
+
 function vistaDocumento(d: D): Hijo {
-  return tarjeta(h('h1', null, texto(d.title)), d.url ? h('div.fila', null, boton('Abrir documento', () => abrir(d.url), 'principal'), h('span.chico.tenue', null, 'El enlace caduca en 60 segundos.')) : aviso('Este documento no tiene archivo.', 'alerta'));
+  return tarjeta(h('h1', null, texto(d.title)), d.url && d.id ? h('div.fila', null, boton('Abrir documento', abrirDocumento(d.id), 'principal')) : aviso('Este documento no tiene archivo.', 'alerta'));
 }
 
 // ───────────────────────── Vistas con sesión ─────────────────────────
@@ -447,9 +465,17 @@ function vistaCuenta(d: D): Hijo {
   );
 }
 
-function archivosDeFactura(a: D): Hijo {
-  if (!a.pdf_url && !a.xml_url) return h('span.chico.tenue', null, 'Sin archivos');
-  return h('div.fila', null, a.pdf_url ? boton('PDF', () => abrir(a.pdf_url), 'principal') : null, a.xml_url ? boton('XML', () => abrir(a.xml_url)) : null);
+/**
+ * Botones de PDF y XML de una factura. El enlace caduca en 60 segundos y Claude pide confirmar antes de abrir
+ * un enlace externo, así que se pide en el mismo clic que lo abre: no se usa uno que ya venía en el resultado.
+ */
+function archivosDeFactura(folio: unknown): Hijo {
+  const pedir = (campo: 'pdf_url' | 'xml_url', nombre: string) => async () => {
+    const archivos = await llamar('archivos_de_factura', { folio: String(folio) });
+    if (!archivos[campo]) throw new Error(`Esta factura no tiene ${nombre}.`);
+    await abrir(archivos[campo]);
+  };
+  return h('div.fila.corrida', null, boton('PDF', pedir('pdf_url', 'PDF')), boton('XML', pedir('xml_url', 'XML')));
 }
 
 function vistaEstadoDeCuenta(d: D): Hijo {
@@ -473,23 +499,10 @@ function vistaEstadoDeCuenta(d: D): Hijo {
             { titulo: 'Vence', celda: (f) => h('div.pila.junto', null, h('span', null, fecha(f.due_date)), f.issued_on ? h('span.chico.tenue', null, `Emitida ${fecha(f.issued_on)}`) : null) },
             { titulo: 'Saldo', celda: (f) => h('div.pila.junto', null, h('b', null, dinero(f.balance)), h('span.chico.tenue', null, `de ${dinero(f.total)}`)), num: true },
             { titulo: 'Estado', celda: (f) => (f.status === 'vencida' ? insignia('Vencida', 'mal') : f.status === 'por_vencer' ? insignia('Por vencer', 'alerta') : insignia(texto(f.status))) },
-            {
-              titulo: 'Archivos',
-              celda: (f) => {
-                const celda = h('div.fila');
-                celda.append(
-                  boton('PDF y XML', async () => {
-                    const archivos = await llamar('archivos_de_factura', { folio: String(f.folio) });
-                    reemplazar(celda, archivosDeFactura(archivos));
-                  }),
-                );
-                return celda;
-              },
-            },
+            { titulo: 'Archivos', celda: (f) => archivosDeFactura(f.folio) },
           ],
           facturas,
         ),
-    facturas.length > 0 ? h('p.chico.tenue', null, 'Los enlaces de PDF y XML caducan en 60 segundos; ábralos en cuanto aparezcan.') : null,
   );
 }
 
@@ -497,8 +510,7 @@ function vistaFactura(d: D): Hijo {
   return tarjeta(
     h('div.encabezado', null, h('h1', null, `Factura ${texto(d.folio)}`), h('span.precio', null, dinero(d.total))),
     h('dl', null, h('dt', null, 'Emisión'), h('dd', null, fecha(d.issued_on)), d.uuid ? [h('dt', null, 'UUID fiscal'), h('dd', null, String(d.uuid))] : null),
-    archivosDeFactura(d),
-    h('p.chico.tenue', null, 'Los enlaces caducan en 60 segundos.'),
+    d.pdf_url || d.xml_url ? archivosDeFactura(d.folio) : h('p.chico.tenue', null, 'Sin archivos.'),
   );
 }
 
@@ -511,7 +523,7 @@ const estadoResultado = (estado: unknown) => {
 function vistaResultados(d: D): Hijo {
   const puntos = lista(d.points);
   if (puntos.length === 0) return tarjeta(h('h1', null, 'Resultados de laboratorio'), h('p.tenue', null, 'No hay resultados publicados.'));
-  return puntos.map((p) => {
+  return limitar(puntos, 2).map((p) => {
     const muestra: D | null = p.sample ?? null;
     const limites = (x: D) => (numero(x.min) !== null && numero(x.max) !== null ? `${x.min} – ${x.max}` : numero(x.max) !== null ? `≤ ${x.max}` : numero(x.min) !== null ? `≥ ${x.min}` : '—');
     return tarjeta(
@@ -567,9 +579,9 @@ function vistaResumen(d: D): Hijo {
         q ? cifra('Solicitudes sin asignar', cuenta(q.unassigned)) : null,
       ),
     ),
-    atencion.map(([k, v]) => tarjeta(h('h2', null, ATENCION[k] ?? etiqueta(k)), generico(v, k))),
+    limitar(atencion, 1).map(([k, v]) => tarjeta(h('h2', null, ATENCION[k] ?? etiqueta(k)), generico(v, k))),
     // Lo que la API agregue después se muestra tal cual, sin esperar a esta vista.
-    otras.map(([k, v]) => tarjeta(h('h2', null, etiqueta(k)), generico(v, k))),
+    limitar(otras, 0).map(([k, v]) => tarjeta(h('h2', null, etiqueta(k)), generico(v, k))),
   ];
 }
 
@@ -615,12 +627,10 @@ function vistaCotizacion(d: D): Hijo {
 
 const VISTAS: Record<string, (datos: D, argumentos: D) => Hijo> = {
   buscar_en_sitio: vistaBusqueda,
-  leer_pagina: vistaPagina,
   datos_de_contacto: vistaContacto,
   catalogo_de_productos: vistaCatalogo,
   envios_devoluciones_y_pagos: vistaTienda,
   articulos_del_blog: vistaBlog,
-  leer_articulo: vistaArticulo,
   documentos: vistaDocumentos,
   leer_documento: vistaDocumento,
   mi_cuenta: vistaCuenta,
@@ -639,7 +649,11 @@ let vista = document.documentElement.dataset.vista ?? '';
 if (!(vista in VISTAS)) vista = '';
 let argumentos: D = {};
 
+let ultima: Lectura | null = null;
+
 function pintar(lectura: Lectura) {
+  ultima = lectura;
+  recortado = false;
   let contenido: Hijo;
   if (!lectura.ok) contenido = tarjeta(aviso(lectura.error, 'mal'));
   else {
@@ -650,7 +664,20 @@ function pintar(lectura: Lectura) {
       contenido = tarjeta(aviso('No se pudo mostrar esta respuesta.', 'mal'), generico(lectura.datos));
     }
   }
-  reemplazar(raiz, contenido);
+  reemplazar(raiz, contenido, recortado ? h('div.fila', null, boton('Ver todo', verTodo)) : null);
+}
+
+/** Muestra las listas completas: en pantalla completa si el cliente la ofrece y, si no, ahí mismo. */
+async function verTodo() {
+  if (app.getHostContext()?.availableDisplayModes?.includes('fullscreen')) {
+    try {
+      await app.requestDisplayMode({ mode: 'fullscreen' });
+    } catch (error) {
+      console.error('[vista] sin pantalla completa', error);
+    }
+  }
+  completo = true;
+  if (ultima) pintar(ultima);
 }
 
 function aplicarContexto(contexto: McpUiHostContext | undefined) {
@@ -662,6 +689,11 @@ function aplicarContexto(contexto: McpUiHostContext | undefined) {
   if (margen) document.body.style.padding = `${margen.top}px ${margen.right}px ${margen.bottom}px ${margen.left}px`;
   const nombre = contexto.toolInfo?.tool?.name;
   if (!vista && typeof nombre === 'string' && nombre in VISTAS) vista = nombre;
+  // Al entrar o salir de pantalla completa (también desde el botón del cliente) se vuelve a dibujar.
+  if (contexto.displayMode && (contexto.displayMode === 'fullscreen') !== completo) {
+    completo = contexto.displayMode === 'fullscreen';
+    if (ultima) pintar(ultima);
+  }
 }
 
 app.ontoolinput = (parametros) => {

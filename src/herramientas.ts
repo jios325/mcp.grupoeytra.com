@@ -49,6 +49,8 @@ export interface Dependencias {
   asistente: ClienteAsistente;
   /** Cupo global por hora de llamadas a la API sin persona (documentos). */
   cupoVisitantes: Limitador;
+  /** URL pública del conector (…/mcp); de ella sale el origen que Claude le da a las vistas. */
+  recurso?: string;
 }
 
 type Contenido = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -86,7 +88,7 @@ export function crearServidor(dep: Dependencias, ctx: Contexto): McpServer {
     { name: 'grupo-eytra', title: 'Grupo Eytra', version: VERSION },
     { instructions: INSTRUCCIONES, capabilities: { tools: { listChanged: false }, resources: { listChanged: false } } },
   );
-  registrarVistas(servidor);
+  registrarVistas(servidor, dep.recurso);
   registrarPublicas(servidor, dep, ctx);
   registrarPrivadas(servidor, dep, ctx);
   return servidor;
@@ -116,7 +118,6 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'leer_pagina',
     {
-      _meta: metaDeVista('leer_pagina'),
       title: 'Leer una página del sitio',
       description:
         'Devuelve el texto de una página de grupoeytra.com (ruta como "/laboratorio" o URL completa del mismo sitio). Si la página es larga, la respuesta trae continuar_desde para pedir el siguiente tramo.' + SOLO_SITIO,
@@ -221,7 +222,6 @@ function registrarPublicas(servidor: McpServer, dep: Dependencias, ctx: Contexto
   servidor.registerTool(
     'leer_articulo',
     {
-      _meta: metaDeVista('leer_articulo'),
       title: 'Leer un artículo del blog',
       description:
         'Texto completo de un artículo publicado del blog (Markdown), con autor, revisor, normas y productos relacionados cuando el CMS los tiene. Si la respuesta trae continuar_desde, pida el resto con leer_pagina y esa URL.' + SOLO_SITIO,

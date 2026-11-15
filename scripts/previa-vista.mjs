@@ -118,7 +118,9 @@ document.documentElement.dataset.tema = tema;
 const bitacora = document.getElementById('bitacora');
 const anotar = (texto) => { bitacora.textContent += texto + '\\n'; };
 const menu = document.getElementById('menu');
-for (const nombre of Object.keys(EJEMPLOS)) {
+// leer_pagina y leer_articulo no tienen vista propia: solo se usan para contestar llamadas de otras vistas.
+const SIN_VISTA = ['leer_pagina', 'leer_articulo'];
+for (const nombre of Object.keys(EJEMPLOS).filter((n) => !SIN_VISTA.includes(n))) {
   const a = document.createElement('a');
   a.href = '?vista=' + nombre + '&tema=' + tema;
   a.textContent = nombre;
@@ -128,7 +130,7 @@ for (const nombre of Object.keys(EJEMPLOS)) {
 document.getElementById('tema').href = '?vista=' + vista + '&tema=' + (tema === 'dark' ? 'light' : 'dark');
 const respuesta = (datos) => ({ content: [{ type: 'text', text: JSON.stringify(datos) }] });
 const marco = document.getElementById('marco');
-const puente = new AppBridge(null, { name: 'Previa Eytra', version: '1.0.0' }, { openLinks: {}, serverTools: {}, logging: {} }, { hostContext: { theme: tema, displayMode: 'inline' } });
+const puente = new AppBridge(null, { name: 'Previa Eytra', version: '1.0.0' }, { openLinks: {}, serverTools: {}, logging: {} }, { hostContext: { theme: tema, displayMode: 'inline', availableDisplayModes: ['inline', 'fullscreen'] } });
 puente.oninitialized = () => {
   anotar('vista lista: ' + vista);
   puente.sendToolInput({ arguments: {} });
@@ -138,6 +140,7 @@ puente.oncalltool = async (p) => {
   anotar('tools/call ' + p.name + ' ' + JSON.stringify(p.arguments ?? {}));
   return p.name in EJEMPLOS ? respuesta(EJEMPLOS[p.name]) : { content: [{ type: 'text', text: 'Herramienta desconocida.' }], isError: true };
 };
+puente.onrequestdisplaymode = async (p) => { anotar('ui/request-display-mode ' + p.mode); puente.sendHostContextChange({ displayMode: p.mode }); return { mode: p.mode }; };
 puente.onopenlink = async (p) => { anotar('ui/open-link ' + p.url); return {}; };
 puente.onsizechange = (p) => { if (p.height) marco.style.height = p.height + 'px'; };
 await puente.connect(new PostMessageTransport(marco.contentWindow, marco.contentWindow));

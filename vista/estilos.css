@@ -40,6 +40,8 @@ h3 { font-size: 13px; font-weight: 650; }
 .tarjeta { background: var(--fondo); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px; display: grid; gap: 10px; min-width: 0; }
 .encabezado { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; }
 .fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fila.corrida { flex-wrap: nowrap; gap: 4px; }
+.fila.corrida button { padding: 3px 7px; font-size: 12px; }
 .pila { display: grid; gap: 6px; min-width: 0; }
 .pila.junto { gap: 0; white-space: nowrap; }
 
@@ -50,7 +52,7 @@ h3 { font-size: 13px; font-weight: 650; }
 
 .desborde { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--borde); vertical-align: top; }
+th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid var(--borde); vertical-align: top; }
 th { font-weight: 600; color: var(--texto-2); font-size: 12px; white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
 

@@ -24,7 +24,7 @@ Las herramientas apagadas en **CMS › Asistente IA** desaparecen para todos. El
 
 ## Vistas en la conversación (MCP Apps)
 
-Cada herramienta lleva además una vista interactiva que el cliente dibuja dentro de la conversación: tabla de facturas con botón de PDF y XML, catálogo con búsqueda, resultados de laboratorio con lo que cumple y lo que no, cotización con partidas y totales, etc. Es la extensión oficial [MCP Apps](https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp) (`io.modelcontextprotocol/ui`) con `@modelcontextprotocol/ext-apps`.
+Quince de las diecisiete herramientas llevan además una vista interactiva que el cliente dibuja dentro de la conversación: tabla de facturas con botón de PDF y XML, catálogo con búsqueda, resultados de laboratorio con lo que cumple y lo que no, cotización con partidas y totales, etc. Es la extensión oficial [MCP Apps](https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp) (`io.modelcontextprotocol/ui`) con `@modelcontextprotocol/ext-apps`.
 
 - **Cómo se enlaza**: cada herramienta de `CON_VISTA` (`src/vistas.ts`) anuncia `_meta.ui.resourceUri` con un recurso `ui://grupo-eytra/<herramienta>.html`. Quitarla de esa lista le quita la vista.
 - **Un cliente sin soporte no nota nada**: ignora `_meta.ui` y recibe el mismo JSON en texto. El resultado para el modelo no cambió.
@@ -32,6 +32,10 @@ Cada herramienta lleva además una vista interactiva que el cliente dibuja dentr
 - **La vista no habla con el servidor ni con el CMS**: corre en un iframe sin red. Para pedir más (el PDF de una factura, otra búsqueda del catálogo, abrir un documento) le pide al cliente que llame otra herramienta de este MCP; esas llamadas cuentan en los mismos topes por persona y por visitante.
 - **Sin recursos externos**: todo el JS y el CSS van incrustados (≈ 690 kB por el SDK), así que no se declara `_meta.ui.csp`. Si algún día se muestran imágenes del catálogo, hay que declarar ahí su dominio.
 - **Lo que llega se escribe como texto**, nunca como HTML: son datos del CMS y del sitio.
+- **Sin vista a propósito**: `leer_pagina` y `leer_articulo` son texto largo para que el modelo lo lea; la guía de diseño de Claude desaconseja vistas de contenido largo o estático.
+- **Origen para Claude**: el recurso declara `_meta.ui.domain` con los primeros 32 caracteres hexadecimales del SHA-256 de `MCP_PUBLIC_URL` + `/mcp`, en `claudemcpcontent.com` ([docs de Claude](https://claude.com/docs/connectors/building/mcp-apps/getting-started)). Solo con URL `https` y solo si el cliente no se identifica como otro (el formato es de cada cliente). **Si cambia la URL pública del conector, cambia el origen**: hay que hashear la URL exacta, sin diagonal final de más.
+- **Corta dentro del chat**: Claude recorta las tarjetas altas y no hay scroll propio, así que las listas se cortan y «Ver todo» pide pantalla completa (`ui/request-display-mode`); si el cliente no la ofrece, se expanden ahí mismo.
+- **Enlaces que caducan**: los de PDF, XML y documentos duran 60 segundos y Claude pide confirmar antes de abrir un enlace externo, así que la vista pide el enlace en el mismo clic que lo abre, nunca usa uno que ya venía en el resultado.
 
 `npm run vista` empaqueta `vista/` en `src/vista.generada.ts` (no se versiona; `dev`, `typecheck`, `test` y `build` lo corren solos). `npm run vista:previa` abre en `http://localhost:8332` cada pantalla con datos de ejemplo, usando el `AppBridge` oficial como cliente: sirve para revisar cambios sin conectar Claude ni ChatGPT.
 
@@ -113,7 +117,7 @@ docker compose up -d --build
 - **Canal en la bitácora**: la API no tiene canal `mcp`; se usa `other` y la llave «MCP» lo distingue en `assistant_log`. Un canal propio requiere una migración en el CMS (`assistant_channel`).
 - **Sesiones y cambios de credencial** (pendiente, auditoría del 14 nov 2026): una sesión del MCP ya emitida no se entera de un cambio de contraseña ni del alta o la baja del doble factor en Supabase; solo la corta un 403/404 de `/me`, y cada renovación le da otros 30 días. Cerrarlo requiere que `/me` devuelva una marca del último cambio de credenciales (CMS) y que el MCP revoque las familias anteriores a esa marca, además de una vida máxima por familia.
 - **Cupo de la llave en la API** (pendiente en el CMS): `assistant_call` descuenta el cupo de la llave antes que el de la persona, así que las llamadas que rechaza por persona también lo gastan. El MCP lo compensa con su tope por persona; lo correcto es invertir el orden en el CMS.
-- **Vistas (MCP Apps)** (pendiente): probadas en local contra el `AppBridge` del SDK, no todavía en Claude ni en ChatGPT; cada cliente aplica su propia política al iframe. Las vistas de `crear_solicitud` y `crear_cotizacion` muestran el resultado, no un formulario previo: la confirmación sigue siendo del modelo con el usuario.
+- **Vistas (MCP Apps)** (pendiente): probadas en local contra el `AppBridge` del SDK, no todavía en Claude ni en ChatGPT; cada cliente aplica su propia política al iframe, y Claude solo las dibuja con el conector remoto en `https` (no con `localhost`). Ajustadas el 14 nov 2026 a la documentación de Claude para quien construye MCP Apps (`claude.com/docs/connectors/building/mcp-apps`). Las vistas de `crear_solicitud` y `crear_cotizacion` muestran el resultado, no un formulario previo: la confirmación sigue siendo del modelo con el usuario.
 - **CIMD** (Client ID Metadata Documents): no implementado; Claude y ChatGPT usan el registro dinámico (`/register`), que es lo que anuncia el servidor.
 - SDK: `@modelcontextprotocol/server` v2 (spec 2026-07-28) con respaldo sin estado para clientes de la spec 2025.
 
